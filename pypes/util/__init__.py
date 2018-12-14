@@ -10,8 +10,8 @@ def ignored(*exceptions):
 	except exceptions:
 		pass
 
+@contextmanager
 def exception_override(target_exception=PypesException, *exceptions):
-	print exceptions
 	try:
 		yield
 	except exceptions:
@@ -46,3 +46,28 @@ def __raise_exception(exception):
 	raise exception()
 
 raise_exception_func = lambda exception: lambda *args, **kwargs: __raise_exception(exception)
+
+class StringWrapper:
+	def __init__(self):
+		self.str = ""
+	def write(self, str):
+		self.str += str
+	def __str__(self):
+		return self.str
+	def __len__(self):
+		return len(self.str)
+
+class RedirectStdStreams(object):
+	
+	def __init__(self):
+		self.stdout = StringWrapper()
+		self.stderr = StringWrapper()
+
+	def __enter__(self):
+		self.old_stdout, self.old_stderr = sys.stdout, sys.stderr
+		self.old_stdout.flush(); self.old_stderr.flush()
+		sys.stdout, sys.stderr = self.stdout, self.stderr
+
+	def __exit__(self, exc_type, exc_value, traceback):
+		sys.stdout = self.old_stdout
+		sys.stderr = self.old_stderr

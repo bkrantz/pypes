@@ -4,6 +4,7 @@ import signal
 from pypes.util.async import AsyncManager, AsyncContextManager, RestartableGreenlet, BreakoutException
 from pypes.globals.async import get_restart_pool
 from pypes.testutils import funcs_tester, _test_func, BaseUnitTest
+from pypes.util import RedirectStdStreams
 import gevent
 import os
 
@@ -366,14 +367,32 @@ class TestRestartableGreenlet(BaseUnitTest):
 		greenlet.running = True
 		self.assertEqual(greenlet._RestartableGreenlet__running, greenlet.running)
 
+		pool.kill()
 	def test__report_error(self):
 		def run_test(): pass
 		pool = gevent.pool.Pool(greenlet_class=RestartableGreenlet)
 		greenlet = pool.spawn(run=run_test,)
-		greenlet._report_error(exc_info=[BreakoutException, BreakoutException(), 0])
-		greenlet._report_error(exc_info=[Exception, Exception(), 0])
+		streamer = RedirectStdStreams()
+		with streamer:
+			greenlet._report_error(exc_info=[BreakoutException, BreakoutException(), 0])
+		self.assertEqual(len(streamer.stderr), 0)
+		with streamer:
+			greenlet._report_error(exc_info=[Exception, Exception(), 0])
+		self.assertNotEqual(len(streamer.stderr), 0)
 
 	def test_kill(self):
-		pass
+		exception = None
+
+		def callback(greenlet):
+			exception = greenlet.exception
+
+		def run_test(*args, **kwargs): pass
+		pool = gevent.pool.Pool(greenlet_class=RestartableGreenlet)
+		greenlet = pool.spawn(run=run_test,)
+		greenlet.link_exception(callback=callback)
+		greenlet.kill()
+		gevent.sleep()
+		print greenlet.exception, exception
+		
 
 
