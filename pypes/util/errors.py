@@ -36,10 +36,11 @@ if __name__.startswith(import_restriction):
 class PypesException(Exception):
 
     def __init__(self, message="", **kwargs):
+        super(PypesException, self).__init__()
         if not isinstance(message, list):
             message = [message]
+        self.message = message
         self.__dict__.update(kwargs)
-        super(PypesException, self).__init__(message)
 
 class QueueEmpty(PypesException):
     pass

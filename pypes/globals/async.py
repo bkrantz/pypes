@@ -1,4 +1,6 @@
 
+DEFAULT_SLEEP_INTERVAL = 0.001
+
 __async_manager = None
 __restart_pool = None
 

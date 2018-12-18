@@ -65,7 +65,8 @@ class RedirectStdStreams(object):
 
 	def __enter__(self):
 		self.old_stdout, self.old_stderr = sys.stdout, sys.stderr
-		self.old_stdout.flush(); self.old_stderr.flush()
+		with ignored(AttributeError):
+			self.old_stdout.flush(); self.old_stderr.flush()
 		sys.stdout, sys.stderr = self.stdout, self.stderr
 
 	def __exit__(self, exc_type, exc_value, traceback):

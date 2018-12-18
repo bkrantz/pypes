@@ -9,9 +9,10 @@ import signal
 from gevent.pool import Pool
 from gevent.greenlet import Greenlet
 from greenlet import GreenletExit
-from pypes.globals.async import get_async_manager, get_restart_pool
+from pypes.globals.async import get_async_manager, get_restart_pool, DEFAULT_SLEEP_INTERVAL
 from pypes.util.errors import PypesException
-from pypes.util import exception_override, ignored
+from pypes.util import exception_override, ignored, RedirectStdStreams
+
 __all__ = []
 
 if __name__.startswith(import_restriction):
@@ -20,6 +21,9 @@ if __name__.startswith(import_restriction):
         "AsyncManager",
         "RestartPool"
     ]
+
+def sleep(duration=DEFAULT_SLEEP_INTERVAL, *args, **kwargs):
+    gevent.sleep(duration, *args, **kwargs)
 
 class BreakoutException(Exception):
     pass
@@ -41,6 +45,10 @@ class AsyncManager:
         self.__stopped = gevent.event.Event()
         self.trigger_stop()
 
+    def __del__(self, *args, **kwargs):
+        for key in self.__manager.iterkeys():
+            self.remove_context_manager(key=key)
+            
     @property
     def is_stopped(self):
         return self.__stopped.is_set()
@@ -48,8 +56,7 @@ class AsyncManager:
     def __pop_stopping_threads(self): #allows start context thread to close
         is_stopped = self.is_stopped
         self.__stopped.set()
-        self.sleep() #bipass local block
-        self.sleep() #bipass global block
+        sleep(); sleep() # bipass local and global blocks
         if not is_stopped:
             self.__stopped.clear()
 
@@ -74,10 +81,7 @@ class AsyncManager:
     def __exit__(self, *args, **kwargs):
         for manager in self.__managers.itervalues():
             self.__try_stop_single(manager=manager)
-        self.__pop_stopping_threads() 
-
-    def sleep(self, duration=0, *args, **kwargs):
-        gevent.sleep(duration)
+        self.__pop_stopping_threads()
 
     def wait_for_stop(self):
         self.__stopped.wait()
@@ -117,25 +121,14 @@ class RestartPool(Pool):
 
     """
 
-    def __init__(self, sleep_interval=0, graceful_restart=True, irregular_restart=True, logger=None, greenlet_class=None, *args, **kwargs):
+    def __init__(self, sleep_interval=DEFAULT_SLEEP_INTERVAL, graceful_restart=True, irregular_restart=True, logger=None, greenlet_class=None, *args, **kwargs):
         self.sleep_interval = sleep_interval
         self.graceful_restart = graceful_restart
         self.irregular_restart = irregular_restart
         self.logger = logger
-        self.__greenlet_dict = {}
         super(RestartPool, self).__init__(greenlet_class=RestartableGreenlet, *args, **kwargs)
 
-    def get_greenlet(self, key):
-        return self.__greenlet_dict.get(key, None)
-
-    def pop_greenlet(self, key):
-        return self.__greenlet_dict.pop(key, None)
-
-    def reset(self):
-        self.kill()
-        self.__greenlet_dict = {}
-
-    def spawn(self, run, key=None, graceful_restart=None, irregular_restart=None, logger=None, *args, **kwargs):
+    def spawn(self, run, graceful_restart=None, irregular_restart=None, logger=None, parent=None, *args, **kwargs):
         """
         An override of the gevent.pool.Pool.spawn(). Exactly the same but uses the kwarg 'restart' to determine if this greenlet restarts.
         If not provided, it defaults to the pool default value
@@ -143,10 +136,9 @@ class RestartPool(Pool):
         graceful_restart = self.graceful_restart if graceful_restart is None else graceful_restart
         irregular_restart = self.irregular_restart if irregular_restart is None else irregular_restart
         logger = self.logger if logger is None else logger
-        new_greenlet = super(RestartPool, self).spawn(run=run, graceful_restart=graceful_restart, irregular_restart=irregular_restart, logger=logger, key=key, *args, **kwargs)
+        new_greenlet = super(RestartPool, self).spawn(run=run, graceful_restart=graceful_restart, irregular_restart=irregular_restart, logger=logger, parent=parent, *args, **kwargs)
         new_greenlet.link_value(callback=self.__graceful_termination)
         new_greenlet.link_exception(callback=self.__irregular_termination)
-        self.__greenlet_dict[new_greenlet.rg_key] = new_greenlet
         return new_greenlet
 
     def respawn_greenlet(self, greenlet):
@@ -154,39 +146,39 @@ class RestartPool(Pool):
             graceful_restart=greenlet.rg_graceful_restart,
             irregular_restart=greenlet.rg_irregular_restart,
             logger=greenlet.rg_logger,
-            key=greenlet.rg_key,
+            suppress_std=greenlet.rg_suppress_std,
+            parent=greenlet.rg_parent,
             *greenlet.rg_args,
             **greenlet.rg_kwargs)
-        self.__greenlet_dict[new_greenlet.rg_key] = new_greenlet
+        if not greenlet.rg_parent is None: greenlet.rg_parent.swap_thread(old_thread=greenlet, new_thread=new_greenlet)
         return new_greenlet
 
     def __graceful_termination(self, greenlet):
-        greenlet.running = False
-        if greenlet.rg_graceful_restart:
+        if greenlet.graceful_restartable and (greenlet.rg_parent is None or greenlet.rg_parent.is_running()):
             self.respawn_greenlet(greenlet=greenlet)
-        else:
-            self.pop_greenlet(key=greenlet.rg_key) #ran it's coarse and will no longer be tracked
+        elif not greenlet.rg_parent is None: greenlet.rg_parent.pop_thread(old_thread=greenlet)
 
     def __irregular_termination(self, greenlet):
-        greenlet.running = False
-        if not isinstance(greenlet.exception, BreakoutException):
+        if not isinstance(greenlet.exception, BreakoutException): # catches the breakoutexception exiting potential infinite restarts
             logger = greenlet.rg_logger
             function_name = greenlet.rg_run.__name__
             error_message = greenlet.exception
 
-            if not logger is None:
-                logger.error("Greenlet '{function_name}' has encountered an uncaught error: {err}".format(function_name=function_name, err=error_message))
+            if not logger is None: logger.error("Greenlet '{function_name}' has encountered an uncaught error: {err}".format(function_name=function_name, err=error_message))
+            
             if greenlet.rg_irregular_restart:
-                get_async_manager().sleep(self.sleep_interval)
-                if not logger is None:
-                    logger.info("Restarting greenlet '{function_name}'...".format(function_name=function_name))
+                sleep(self.sleep_interval)
+                if not logger is None: logger.info("Restarting greenlet '{function_name}'...".format(function_name=function_name))
                 self.respawn_greenlet(greenlet=greenlet)
             else:
-                self.pop_greenlet(key=greenlet.rg_key) #ran it's coarse and will no longer be tracked
-                raise greenlet.exception
+                if not greenlet.rg_parent is None: greenlet.rg_parent.pop_thread(old_thread=greenlet)
+                if not greenlet.rg_suppress_std: raise greenlet.exception
 
-    def kill(self, exception=None, *args, **kwargs):
-        return super(RestartPool, self).kill(exception=BreakoutException, block=False)
+    def killone(self, greenlet, exception=None, block=None, *args, **kwargs):
+        return super(RestartPool, self).killone(greenlet=greenlet, exception=BreakoutException, block=False, *args, **kwargs)
+
+    def kill(self, exception=None, block=None, *args, **kwargs):
+        return super(RestartPool, self).kill(exception=BreakoutException, block=False, *args, **kwargs)
 
 class RestartableGreenlet(Greenlet):
     """
@@ -207,34 +199,47 @@ class RestartableGreenlet(Greenlet):
             graceful_restart=True,
             irregular_restart=True,
             logger=None,
-            key=None,
+            suppress_std=False,
+            parent=None,
             *args,
             **kwargs):
         self.rg_run = run
         self.rg_graceful_restart = graceful_restart
         self.rg_irregular_restart = irregular_restart
         self.rg_logger = logger
-        self.rg_key = uuid().get_hex() if key is None else key
         self.rg_args = args
         self.rg_kwargs = kwargs
-        self.__running = True
+        self.rg_suppress_std = suppress_std
+        assert parent is None or isinstance(parent, AsyncContextManager)
+        self.rg_parent = parent
         super(RestartableGreenlet, self).__init__(run=run, *args, **kwargs)
 
     @property
     def running(self):
-        return self.__running
+        return self.started and not self.dead
 
-    @running.setter
-    def running(self, running):
-        self.__running = bool(running)
+    @property
+    def restartable(self):
+        return self.irregular_restartable or self.graceful_restartable
+
+    @property
+    def irregular_restartable(self):
+        return self.dead and isinstance(self.exception, Exception) and not isinstance(self.exception, BreakoutException) and self.rg_irregular_restart
+    
+    @property
+    def graceful_restartable(self):
+        return self.exception is None and self.dead and self.rg_graceful_restart
     
     def _report_error(self, exc_info, *args, **kwargs):
-        if isinstance(exc_info[1], BreakoutException):
-            return
+        #suppress stdout/stderr for BreakoutExceptions
+        if isinstance(exc_info[1], BreakoutException) or self.rg_suppress_std:
+            with RedirectStdStreams():
+                value = super(RestartableGreenlet, self)._report_error(exc_info=exc_info, *args, **kwargs)
+            return value
         return super(RestartableGreenlet, self)._report_error(exc_info=exc_info, *args, **kwargs)
 
-    def kill(self, exception=None, *args, **kwargs):
-        return super(RestartableGreenlet, self).kill(exception=BreakoutException, block=False)
+    def kill(self, exception=None, block=None, *args, **kwargs):
+        return super(RestartableGreenlet, self).kill(exception=BreakoutException, block=False, *args, **kwargs)
 
 class AsyncContextManager(object):
     __async_class = gevent.event.Event
@@ -245,24 +250,39 @@ class AsyncContextManager(object):
         self.__running.clear()
         self.__stop = AsyncContextManager.__async_class()
         self.__stop.set()
-        self.__sub_thread_keys = []
+        self.__sub_threads = []
         get_async_manager().add_context_manager(key=self.__async_hidden_key, manager=self)
 
     def __del__(self, *args, **kwargs):
         get_async_manager().remove_context_manager(key=self.__async_hidden_key)
+        self.__kill_running_greenlets()
+
+    def swap_thread(self, old_thread, new_thread):
+        self.pop_thread(old_thread=old_thread)
+        if not new_thread in self.__sub_threads: self.__sub_threads.append(new_thread)
+
+    def pop_thread(self, old_thread):
+        with ignored(ValueError):
+            self.__sub_threads.remove(old_thread)
 
     def start(self, *args, **kwargs):
         self.__running.set()
         self.__stop.clear()
-        for thread_key in self.__sub_thread_keys: #starts all related non running threads
-            thread = get_restart_pool().get_greenlet(key=thread_key)
-            if not thread.running: get_restart_pool().respawn_greenlet(greenlet=thread)
+        self.__respawn_stopped_greenlets()
+
+    def __respawn_stopped_greenlets(self):
+        for greenlet in self.__sub_threads[:]: #needs to be copy as list is being edited
+            if greenlet.restartable:
+                get_restart_pool().respawn_greenlet(greenlet=greenlet) # already readded to sub_threads through pool
+
+    def __kill_running_greenlets(self):
+        for greenlet in self.__sub_threads: #force kills all related running threads
+            if greenlet.running: get_restart_pool().killone(greenlet=greenlet)
 
     def stop(self, *args, **kwargs):
+        self.__kill_running_greenlets()
         self.__running.clear()
-        for thread_key in self.__sub_thread_keys: #force kills all related running threads
-            greenlet = get_restart_pool().get_greenlet(key=thread_key)
-            if greenlet.running: greenlet.kill()
+        sleep() #attempt trigger exceptions
 
     def __enter__(self, *args, **kwargs):
         self.start(*args, **kwargs)
@@ -271,8 +291,8 @@ class AsyncContextManager(object):
         self.stop(*args, **kwargs)
 
     def spawn_thread(self, run, *args, **kwargs):
-        thread = get_restart_pool().spawn(run=self.__force_running, forced_func=run, *args, **kwargs)
-        self.__sub_thread_keys.append(thread.rg_key)
+        thread = get_restart_pool().spawn(run=self.__force_running, forced_func=run, parent=self, *args, **kwargs)
+        self.__sub_threads.append(thread)
         return thread
 
     def __force_running(self, forced_func, *args, **kwargs):

@@ -1,12 +1,21 @@
 import unittest
-from pypes.globals.async import get_restart_pool
+from pypes.globals.async import get_restart_pool, get_async_manager
+from pypes.util.async import sleep
+from pypes.util import RedirectStdStreams
 
 class BaseUnitTest(unittest.TestCase):
+
 	def setUp(self):
-		get_restart_pool().reset()
+		with RedirectStdStreams():
+			get_async_manager()._AsyncManager__managers = {}
+			get_restart_pool().kill()
+			sleep(); sleep(); sleep()
 
 	def tearDown(self):
-		get_restart_pool().reset()
+		with RedirectStdStreams():
+			get_async_manager()._AsyncManager__managers = {}
+			get_restart_pool().kill()
+			sleep(); sleep(); sleep()
 
 def funcs_tester(clazz, func_definitions={}, *args, **kwargs):
 	class MixinClass:
@@ -45,7 +54,7 @@ def funcs_tester(clazz, func_definitions={}, *args, **kwargs):
 		setattr(new_class, func_name, getattr(new_class, MixinClass.get_placeholder_func_name(func_name=func_name)))
 	return new_class
 
-def _test_func(self, obj, func_name, did, args, kwargs, count=1):
+def _test_func(self, obj, func_name, did, args, kwargs, count=0):
 	self.assertEqual(getattr(obj, "did_%s" % func_name, None), did)
 	self.assertEqual(getattr(obj, "args_%s" % func_name, None), args)
 	self.assertEqual(getattr(obj, "kwargs_%s" % func_name, None), kwargs)

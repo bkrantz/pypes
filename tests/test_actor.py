@@ -6,6 +6,7 @@ from pypes.testutils import funcs_tester, _test_func
 from pypes.util import remove_dupes, raise_exception_func
 from pypes.util.logger import Logger
 from pypes.util.errors import (QueueConnected, InvalidActorOutput, QueueEmpty, InvalidEventConversion, InvalidActorInput, QueueFull, PypesException)
+from pypes.util.async import sleep
 import abc
 import gevent
 import time
@@ -330,7 +331,7 @@ class TestActor(unittest.TestCase):
 		_test_func(self=self, obj=actor, func_name="spawn_thread", did=False, args=None, kwargs=None)
 		actor._Actor__register_consumer(queue_name="test_name", queue=queue)
 		self.assertEqual(len(actor.pool.inbound), 1)
-		_test_func(self=self, obj=actor, func_name="spawn_thread", did=True, args=tuple(), kwargs={"run":actor._Actor__consumer, "origin_queue":queue})
+		_test_func(self=self, obj=actor, func_name="spawn_thread", did=True, args=tuple(), kwargs={"run":actor._Actor__consumer, "origin_queue":queue}, count=1)
 
 	def test__Actor__register_consumer_2(self):
 		#test __consumer threading
@@ -341,9 +342,10 @@ class TestActor(unittest.TestCase):
 		actor._Actor__register_consumer(queue_name="test_name", queue=queue)
 		self.assertEqual(len(actor.pool.inbound), 1)
 		_test_func(self=self, obj=actor, func_name="_Actor__consumer", did=False, args=None, kwargs=None)
-		get_async_manager().sleep(0)
+		actor.start()
+		sleep(0)
 		self.assertEqual(len(actor.pool.inbound), 1)
-		_test_func(self=self, obj=actor, func_name="_Actor__consumer", did=True, args=tuple(), kwargs={"origin_queue":queue})
+		_test_func(self=self, obj=actor, func_name="_Actor__consumer", did=True, args=tuple(), kwargs={"origin_queue":queue}, count=1)
 
 	#########
 	# start #
@@ -368,7 +370,7 @@ class TestActor(unittest.TestCase):
 		actor = MockedActor(name='actor_name')
 		_test_func(self=self, obj=actor, func_name="pre_hook", did=False, args=None, kwargs=None)
 		actor.start()
-		_test_func(self=self, obj=actor, func_name="pre_hook", did=True, args=tuple(), kwargs=dict())
+		_test_func(self=self, obj=actor, func_name="pre_hook", did=True, args=tuple(), kwargs=dict(), count=1)
 
 	########
 	# stop #
@@ -386,7 +388,7 @@ class TestActor(unittest.TestCase):
 		actor = MockedActor(name='actor_name')
 		_test_func(self=self, obj=actor, func_name="post_hook", did=False, args=None, kwargs=None)
 		actor.stop()
-		_test_func(self=self, obj=actor, func_name="post_hook", did=True, args=tuple(), kwargs=dict())
+		_test_func(self=self, obj=actor, func_name="post_hook", did=True, args=tuple(), kwargs=dict(), count=1)
 
 	######################
 	# _Actor__send_event #
@@ -399,7 +401,7 @@ class TestActor(unittest.TestCase):
 		actor.pool.outbound.add(name=queue.name, queue=queue)
 		_test_func(self=self, obj=actor, func_name="_Actor__loop_send", did=False, args=None, kwargs=None)
 		actor._Actor__send_event(event=event)
-		_test_func(self=self, obj=actor, func_name="_Actor__loop_send", did=True, args=tuple(), kwargs={"event":event, "destination_queues":actor.pool.outbound})
+		_test_func(self=self, obj=actor, func_name="_Actor__loop_send", did=True, args=tuple(), kwargs={"event":event, "destination_queues":actor.pool.outbound}, count=1)
 
 	def test__Actor__send_event_2(self):
 		#test provided queues
@@ -407,7 +409,7 @@ class TestActor(unittest.TestCase):
 		actor, queue, event = MockedActor(name='actor_name'), Queue("test_queue2"), Event()
 		_test_func(self=self, obj=actor, func_name="_Actor__loop_send", did=False, args=None, kwargs=None)
 		actor._Actor__send_event(event=event, destination_queues=[queue])
-		_test_func(self=self, obj=actor, func_name="_Actor__loop_send", did=True, args=tuple(), kwargs={"event":event, "destination_queues":[queue]})
+		_test_func(self=self, obj=actor, func_name="_Actor__loop_send", did=True, args=tuple(), kwargs={"event":event, "destination_queues":[queue]}, count=1)
 
 	######################
 	# _Actor__send_error #
@@ -419,7 +421,7 @@ class TestActor(unittest.TestCase):
 		actor.pool.error.add(name=queue.name, queue=queue)
 		_test_func(self=self, obj=actor, func_name="_Actor__loop_send", did=False, args=None, kwargs=None)
 		actor._Actor__send_error(event=event)
-		_test_func(self=self, obj=actor, func_name="_Actor__loop_send", did=True, args=tuple(), kwargs={"event":event, "destination_queues":actor.pool.error})
+		_test_func(self=self, obj=actor, func_name="_Actor__loop_send", did=True, args=tuple(), kwargs={"event":event, "destination_queues":actor.pool.error}, count=1)
 
 	#####################
 	# _Actor__loop_send #
@@ -509,7 +511,7 @@ class TestActor(unittest.TestCase):
 		self.assertNotEqual(id2, id4)
 		self.assertNotEqual(id3, id4)
 		self.assertEqual(id4, id5)
-		get_async_manager().sleep(1)
+		sleep(1)
 		id6 = actor2._Actor__generate_split_id(event=event2)
 		self.assertNotEqual(id4, id6)
 
@@ -524,8 +526,8 @@ class TestActor(unittest.TestCase):
 		_test_func(self=self, obj=actor, func_name="_Actor__consumer", did=False, args=None, kwargs=None)
 		get_restart_pool().spawn(actor._Actor__consumer)
 		_test_func(self=self, obj=actor, func_name="_Actor__consumer", did=False, args=None, kwargs=None)
-		get_async_manager().sleep(0)
-		_test_func(self=self, obj=actor, func_name="_Actor__consumer", did=True, args=tuple(), kwargs=dict())
+		sleep(0)
+		_test_func(self=self, obj=actor, func_name="_Actor__consumer", did=True, args=tuple(), kwargs=dict(), count=1)
 
 	def test__Actor__consumer_2(self):
 		#test start then add event
@@ -533,18 +535,17 @@ class TestActor(unittest.TestCase):
 		actor, event, queue = MockedActor(name='actor_name'), Event(), Queue("queue_name")
 		_test_func(self=self, obj=actor, func_name="_Actor__try_spawn_consume", did=False, args=None, kwargs=None)
 		get_restart_pool().spawn(actor._Actor__consumer, origin_queue=queue)
-		get_async_manager().sleep(0)
 		_test_func(self=self, obj=actor, func_name="_Actor__try_spawn_consume", did=False, args=None, kwargs=None)
 		self.assertEqual(actor.is_running(), False)
 		actor.start()
 		self.assertEqual(actor.is_running(), True)
 		_test_func(self=self, obj=actor, func_name="_Actor__try_spawn_consume", did=False, args=None, kwargs=None)
-		get_async_manager().sleep(0)
+		sleep()
 		_test_func(self=self, obj=actor, func_name="_Actor__try_spawn_consume", did=False, args=None, kwargs=None)
 		queue.put(event)
 		_test_func(self=self, obj=actor, func_name="_Actor__try_spawn_consume", did=False, args=None, kwargs=None)
-		get_async_manager().sleep(0)
-		_test_func(self=self, obj=actor, func_name="_Actor__try_spawn_consume", did=True, args=tuple(), kwargs={"origin_queue":queue, "timeout":10})
+		sleep()
+		_test_func(self=self, obj=actor, func_name="_Actor__try_spawn_consume", did=True, args=tuple(), kwargs={"origin_queue":queue, "timeout":10}, count=1)
 
 	def test__Actor__consumer_3(self):
 		#test add event then start
@@ -552,18 +553,17 @@ class TestActor(unittest.TestCase):
 		actor, event, queue = MockedActor(name='actor_name'), Event(), Queue("queue_name")
 		_test_func(self=self, obj=actor, func_name="_Actor__try_spawn_consume", did=False, args=None, kwargs=None)
 		get_restart_pool().spawn(actor._Actor__consumer, origin_queue=queue)
-		get_async_manager().sleep(0)
 		_test_func(self=self, obj=actor, func_name="_Actor__try_spawn_consume", did=False, args=None, kwargs=None)
 		queue.put(event)
 		_test_func(self=self, obj=actor, func_name="_Actor__try_spawn_consume", did=False, args=None, kwargs=None)
-		get_async_manager().sleep(0)
+		sleep()
 		_test_func(self=self, obj=actor, func_name="_Actor__try_spawn_consume", did=False, args=None, kwargs=None)
 		self.assertEqual(actor.is_running(), False)
 		actor.start()
 		self.assertEqual(actor.is_running(), True)
 		_test_func(self=self, obj=actor, func_name="_Actor__try_spawn_consume", did=False, args=None, kwargs=None)
-		get_async_manager().sleep(0)
-		_test_func(self=self, obj=actor, func_name="_Actor__try_spawn_consume", did=True, args=tuple(), kwargs={"origin_queue":queue, "timeout":10})
+		sleep()
+		_test_func(self=self, obj=actor, func_name="_Actor__try_spawn_consume", did=True, args=tuple(), kwargs={"origin_queue":queue, "timeout":10}, count=1)
 
 	def test__Actor__consumer_4(self):
 		#test start, add_event, stop
@@ -571,22 +571,19 @@ class TestActor(unittest.TestCase):
 		actor, event, queue = MockedActor(name='actor_name'), Event(), Queue("queue_name")
 		_test_func(self=self, obj=actor, func_name="_Actor__try_spawn_consume", did=False, args=None, kwargs=None)
 		get_restart_pool().spawn(actor._Actor__consumer, origin_queue=queue)
-		get_async_manager().sleep(0)
 		_test_func(self=self, obj=actor, func_name="_Actor__try_spawn_consume", did=False, args=None, kwargs=None)
 		self.assertEqual(actor.is_running(), False)
 		actor.start()
 		self.assertEqual(actor.is_running(), True)
 		_test_func(self=self, obj=actor, func_name="_Actor__try_spawn_consume", did=False, args=None, kwargs=None)
-		get_async_manager().sleep(0)
+		sleep(0)
 		_test_func(self=self, obj=actor, func_name="_Actor__try_spawn_consume", did=False, args=None, kwargs=None)
 		queue.put(event)
 		_test_func(self=self, obj=actor, func_name="_Actor__try_spawn_consume", did=False, args=None, kwargs=None)
 		self.assertEqual(actor.is_running(), True)
 		actor.stop()
 		self.assertEqual(actor.is_running(), False)
-		_test_func(self=self, obj=actor, func_name="_Actor__try_spawn_consume", did=False, args=None, kwargs=None)
-		get_async_manager().sleep(0)
-		_test_func(self=self, obj=actor, func_name="_Actor__try_spawn_consume", did=True, args=tuple(), kwargs={"origin_queue":queue, "timeout":10})
+		_test_func(self=self, obj=actor, func_name="_Actor__try_spawn_consume", did=True, args=tuple(), kwargs={"origin_queue":queue, "timeout":10}, count=1)
 
 	def test__Actor__consumer_5(self):
 		#test start, stop, add_event
@@ -594,65 +591,57 @@ class TestActor(unittest.TestCase):
 		actor, event, queue = MockedActor(name='actor_name'), Event(), Queue("queue_name")
 		_test_func(self=self, obj=actor, func_name="_Actor__try_spawn_consume", did=False, args=None, kwargs=None)
 		get_restart_pool().spawn(actor._Actor__consumer, origin_queue=queue)
-		get_async_manager().sleep(0)
+		sleep(0)
 		_test_func(self=self, obj=actor, func_name="_Actor__try_spawn_consume", did=False, args=None, kwargs=None)
 		self.assertEqual(actor.is_running(), False)
 		actor.start()
 		self.assertEqual(actor.is_running(), True)
 		_test_func(self=self, obj=actor, func_name="_Actor__try_spawn_consume", did=False, args=None, kwargs=None)
-		get_async_manager().sleep(0)
+		sleep(0)
 		_test_func(self=self, obj=actor, func_name="_Actor__try_spawn_consume", did=False, args=None, kwargs=None)
 		self.assertEqual(actor.is_running(), True)
 		actor.stop()
 		self.assertEqual(actor.is_running(), False)
 		_test_func(self=self, obj=actor, func_name="_Actor__try_spawn_consume", did=False, args=None, kwargs=None)
-		get_async_manager().sleep(0)
+		sleep(0)
 		_test_func(self=self, obj=actor, func_name="_Actor__try_spawn_consume", did=False, args=None, kwargs=None)
 		queue.put(event)
 		_test_func(self=self, obj=actor, func_name="_Actor__try_spawn_consume", did=False, args=None, kwargs=None)
-		get_async_manager().sleep(0)
-		_test_func(self=self, obj=actor, func_name="_Actor__try_spawn_consume", did=True, args=tuple(), kwargs={"origin_queue":queue, "timeout":10})
+		sleep(0)
+		_test_func(self=self, obj=actor, func_name="_Actor__try_spawn_consume", did=False, args=None, kwargs=None)
 
 	def test__Actor__consumer_6(self):
 		#test start, add_event, stop, reset, start
 		MockedActor = funcs_tester(clazz=MockActor, func_definitions={"_Actor__try_spawn_consume":None})
 		actor, event, queue = MockedActor(name='actor_name'), Event(), Queue("queue_name")
 		_test_func(self=self, obj=actor, func_name="_Actor__try_spawn_consume", did=False, args=None, kwargs=None)
-		get_restart_pool().spawn(actor._Actor__consumer, origin_queue=queue)
-		get_async_manager().sleep(0)
-		_test_func(self=self, obj=actor, func_name="_Actor__try_spawn_consume", did=False, args=None, kwargs=None)
-		self.assertEqual(actor.is_running(), False)
+		get_restart_pool().spawn(run=actor._Actor__consumer, origin_queue=queue)
 		actor.start()
-		self.assertEqual(actor.is_running(), True)
 		_test_func(self=self, obj=actor, func_name="_Actor__try_spawn_consume", did=False, args=None, kwargs=None)
-		get_async_manager().sleep(0)
+		sleep(0)
 		_test_func(self=self, obj=actor, func_name="_Actor__try_spawn_consume", did=False, args=None, kwargs=None)
 		queue.put(event)
 		_test_func(self=self, obj=actor, func_name="_Actor__try_spawn_consume", did=False, args=None, kwargs=None)
 		self.assertEqual(actor.is_running(), True)
 		actor.stop()
 		self.assertEqual(actor.is_running(), False)
-		_test_func(self=self, obj=actor, func_name="_Actor__try_spawn_consume", did=False, args=None, kwargs=None)
-		get_async_manager().sleep(0)
-		get_async_manager().sleep(0)
-		get_async_manager().sleep(0)
-		_test_func(self=self, obj=actor, func_name="_Actor__try_spawn_consume", did=True, args=tuple(), kwargs={"origin_queue":queue, "timeout":10})
+		_test_func(self=self, obj=actor, func_name="_Actor__try_spawn_consume", did=True, args=tuple(), kwargs={"origin_queue":queue, "timeout":10}, count=1)
 		func_name = "_Actor__try_spawn_consume"
 		did_attr_name = "did_%s" % func_name
 		args_attr_name = "args_%s" % func_name
 		kwargs_attr_name = "kwargs_%s" % func_name
+		count_attr_name = "count_%s" % func_name
 		setattr(actor, did_attr_name, False)
 		setattr(actor, args_attr_name, None)
 		setattr(actor, kwargs_attr_name, None)
-		_test_func(self=self, obj=actor, func_name="_Actor__try_spawn_consume", did=False, args=None, kwargs=None)
-		get_async_manager().sleep(0)
+		setattr(actor, count_attr_name, 0)
 		_test_func(self=self, obj=actor, func_name="_Actor__try_spawn_consume", did=False, args=None, kwargs=None)
 		self.assertEqual(actor.is_running(), False)
 		actor.start()
 		self.assertEqual(actor.is_running(), True)
 		_test_func(self=self, obj=actor, func_name="_Actor__try_spawn_consume", did=False, args=None, kwargs=None)
-		get_async_manager().sleep(0)
-		_test_func(self=self, obj=actor, func_name="_Actor__try_spawn_consume", did=True, args=tuple(), kwargs={"origin_queue":queue, "timeout":10})
+		sleep(0)
+		_test_func(self=self, obj=actor, func_name="_Actor__try_spawn_consume", did=True, args=tuple(), kwargs={"origin_queue":queue, "timeout":10}, count=1)
 
 	#############################
 	# _Actor__try_spawn_consume #
@@ -667,7 +656,7 @@ class TestActor(unittest.TestCase):
 		queue.put(event)
 		_test_func(self=self, obj=actor, func_name="spawn_thread", did=False, args=None, kwargs=None)
 		actor._Actor__try_spawn_consume(origin_queue=queue)
-		_test_func(self=self, obj=actor, func_name="spawn_thread", did=True, args=tuple(), kwargs={"run":actor._Actor__do_consume, "event":event, "origin_queue":queue, "graceful_restart":False, "irregular_restart":False})
+		_test_func(self=self, obj=actor, func_name="spawn_thread", did=True, args=tuple(), kwargs={"run":actor._Actor__do_consume, "event":event, "origin_queue":queue, "graceful_restart":False, "irregular_restart":False}, count=1)
 
 	##################################
 	# _Actor__consume_pre_processing #
@@ -712,7 +701,7 @@ class TestActor(unittest.TestCase):
 		actor.input = event.__class__
 		_test_func(self=self, obj=event, func_name="timeout_check", did=False, args=None, kwargs=None)
 		new_event = actor._Actor__consume_pre_processing(event=event, origin_queue=Queue("queue_name"))
-		_test_func(self=self, obj=new_event, func_name="timeout_check", did=True, args=tuple(), kwargs=dict())
+		_test_func(self=self, obj=new_event, func_name="timeout_check", did=True, args=tuple(), kwargs=dict(), count=1)
 
 	###################################
 	# _Actor__consume_post_processing #
@@ -753,7 +742,7 @@ class TestActor(unittest.TestCase):
 		actor.output = event.__class__
 		_test_func(self=self, obj=event, func_name="timeout_check", did=False, args=None, kwargs=None)
 		new_event = actor._Actor__consume_post_processing(event=event, destination_queues=Queue("queue_name"))
-		_test_func(self=self, obj=new_event, func_name="timeout_check", did=True, args=tuple(), kwargs=dict())
+		_test_func(self=self, obj=new_event, func_name="timeout_check", did=True, args=tuple(), kwargs=dict(), count=1)
 
 	###########################
 	# _Actor__consume_wrapper #
@@ -765,7 +754,7 @@ class TestActor(unittest.TestCase):
 		actor = funcs_tester(clazz=MockActor, func_definitions={"consume": event, "_Actor__format_event": None, "_Actor__format_queues": None})(name='actor_name')
 		_test_func(self=self, obj=actor, func_name="consume", did=False, args=None, kwargs=None)
 		actor._Actor__consume_wrapper(event=event, origin_queue=queue)
-		_test_func(self=self, obj=actor, func_name="consume", did=True, args=tuple(), kwargs={"event":event, "origin_queue":queue})
+		_test_func(self=self, obj=actor, func_name="consume", did=True, args=tuple(), kwargs={"event":event, "origin_queue":queue}, count=1)
 
 	def test__Actor__consume_wrapper_2(self):
 		#test returns 1
@@ -773,7 +762,7 @@ class TestActor(unittest.TestCase):
 		actor = funcs_tester(clazz=MockActor, func_definitions={"consume": event, "_Actor__format_event": None, "_Actor__format_queues": None})(name='actor_name')
 		_test_func(self=self, obj=actor, func_name="consume", did=False, args=None, kwargs=None)
 		actor._Actor__consume_wrapper(event=event, origin_queue=queue)
-		_test_func(self=self, obj=actor, func_name="consume", did=True, args=tuple(), kwargs={"event":event, "origin_queue":queue})
+		_test_func(self=self, obj=actor, func_name="consume", did=True, args=tuple(), kwargs={"event":event, "origin_queue":queue}, count=1)
 
 	def test__Actor__consume_wrapper_3(self):
 		#test returns 2
@@ -781,7 +770,7 @@ class TestActor(unittest.TestCase):
 		actor = funcs_tester(clazz=MockActor, func_definitions={"consume": (event, queue), "_Actor__format_event": None, "_Actor__format_queues": None})(name='actor_name')
 		_test_func(self=self, obj=actor, func_name="consume", did=False, args=None, kwargs=None)
 		actor._Actor__consume_wrapper(event=event, origin_queue=queue)
-		_test_func(self=self, obj=actor, func_name="consume", did=True, args=tuple(), kwargs={"event":event, "origin_queue":queue})
+		_test_func(self=self, obj=actor, func_name="consume", did=True, args=tuple(), kwargs={"event":event, "origin_queue":queue}, count=1)
 
 	def test__Actor__consume_wrapper_4(self):
 		#test returns 3
@@ -789,7 +778,7 @@ class TestActor(unittest.TestCase):
 		actor = funcs_tester(clazz=MockActor, func_definitions={"consume": (event, queue, None), "_Actor__format_event": None, "_Actor__format_queues": None})(name='actor_name')
 		_test_func(self=self, obj=actor, func_name="consume", did=False, args=None, kwargs=None)
 		actor._Actor__consume_wrapper(event=event, origin_queue=queue)
-		_test_func(self=self, obj=actor, func_name="consume", did=True, args=tuple(), kwargs={"event":event, "origin_queue":queue})
+		_test_func(self=self, obj=actor, func_name="consume", did=True, args=tuple(), kwargs={"event":event, "origin_queue":queue}, count=1)
 
 	def test__Actor__consume_wrapper_5(self):
 		#test formats
@@ -799,9 +788,9 @@ class TestActor(unittest.TestCase):
 		_test_func(self=self, obj=actor, func_name="_Actor__format_event", did=False, args=None, kwargs=None)
 		_test_func(self=self, obj=actor, func_name="_Actor__format_queues", did=False, args=None, kwargs=None)
 		actor._Actor__consume_wrapper(event=event, origin_queue=queue)
-		_test_func(self=self, obj=actor, func_name="consume", did=True, args=tuple(), kwargs={"event":event, "origin_queue":queue})
-		_test_func(self=self, obj=actor, func_name="_Actor__format_event", did=True, args=tuple(), kwargs={"event":event})
-		_test_func(self=self, obj=actor, func_name="_Actor__format_queues", did=True, args=tuple(), kwargs={"queues":queue})
+		_test_func(self=self, obj=actor, func_name="consume", did=True, args=tuple(), kwargs={"event":event, "origin_queue":queue}, count=1)
+		_test_func(self=self, obj=actor, func_name="_Actor__format_event", did=True, args=tuple(), kwargs={"event":event}, count=1)
+		_test_func(self=self, obj=actor, func_name="_Actor__format_queues", did=True, args=tuple(), kwargs={"queues":queue}, count=1)
 
 	######################
 	# _Actor__do_consume # X
@@ -817,9 +806,9 @@ class TestActor(unittest.TestCase):
 		_test_func(self=self, obj=actor, func_name="_Actor__consume_post_processing", did=False, args=None, kwargs=None)
 		_test_func(self=self, obj=actor, func_name="_Actor__send_event", did=False, args=None, kwargs=None)
 		actor._Actor__do_consume(event=event, origin_queue=queue)
-		_test_func(self=self, obj=actor, func_name="_Actor__consume_pre_processing", did=True, args=tuple(), kwargs={"event":event, "origin_queue": queue})
-		_test_func(self=self, obj=actor, func_name="_Actor__consume_wrapper", did=True, args=tuple(), kwargs={"event":1, "origin_queue": queue})
-		_test_func(self=self, obj=actor, func_name="_Actor__consume_post_processing", did=True, args=tuple(), kwargs={"event":2, "destination_queues":3})
+		_test_func(self=self, obj=actor, func_name="_Actor__consume_pre_processing", did=True, args=tuple(), kwargs={"event":event, "origin_queue": queue}, count=1)
+		_test_func(self=self, obj=actor, func_name="_Actor__consume_wrapper", did=True, args=tuple(), kwargs={"event":1, "origin_queue": queue}, count=1)
+		_test_func(self=self, obj=actor, func_name="_Actor__consume_post_processing", did=True, args=tuple(), kwargs={"event":2, "destination_queues":3}, count=1)
 		_test_func(self=self, obj=actor, func_name="_Actor__send_event", did=False, args=None, kwargs=None)
 	
 	def test__Actor__do_consume_2(self):
@@ -832,10 +821,10 @@ class TestActor(unittest.TestCase):
 		_test_func(self=self, obj=actor, func_name="_Actor__consume_post_processing", did=False, args=None, kwargs=None)
 		_test_func(self=self, obj=actor, func_name="_Actor__send_event", did=False, args=None, kwargs=None)
 		actor._Actor__do_consume(event=event, origin_queue=queue)
-		_test_func(self=self, obj=actor, func_name="_Actor__consume_pre_processing", did=True, args=tuple(), kwargs={"event":event, "origin_queue": queue})
-		_test_func(self=self, obj=actor, func_name="_Actor__consume_wrapper", did=True, args=tuple(), kwargs={"event":1, "origin_queue": queue})
-		_test_func(self=self, obj=actor, func_name="_Actor__consume_post_processing", did=True, args=tuple(), kwargs={"event":2, "destination_queues":3})
-		_test_func(self=self, obj=actor, func_name="_Actor__send_event", did=True, args=tuple(), kwargs={"event":event, "destination_queues":3})
+		_test_func(self=self, obj=actor, func_name="_Actor__consume_pre_processing", did=True, args=tuple(), kwargs={"event":event, "origin_queue": queue}, count=1)
+		_test_func(self=self, obj=actor, func_name="_Actor__consume_wrapper", did=True, args=tuple(), kwargs={"event":1, "origin_queue": queue}, count=1)
+		_test_func(self=self, obj=actor, func_name="_Actor__consume_post_processing", did=True, args=tuple(), kwargs={"event":2, "destination_queues":3}, count=1)
+		_test_func(self=self, obj=actor, func_name="_Actor__send_event", did=True, args=tuple(), kwargs={"event":event, "destination_queues":3}, count=1)
 
 	def test__Actor__do_consume_3(self):
 		#test QueueFull with wait
@@ -858,10 +847,11 @@ class TestActor(unittest.TestCase):
 		_test_func(self=self, obj=actor, func_name="_Actor__consume_pre_processing", did=False, args=None, kwargs=None)
 		_test_func(self=self, obj=actor, func_name="_Actor__consume_wrapper", did=False, args=None, kwargs=None)
 		_test_func(self=self, obj=actor, func_name="_Actor__consume_post_processing", did=False, args=None, kwargs=None)
-		get_async_manager().sleep(0)
-		_test_func(self=self, obj=actor, func_name="_Actor__consume_pre_processing", did=True, args=tuple(), kwargs={"event":event1, "origin_queue": queue})
-		_test_func(self=self, obj=actor, func_name="_Actor__consume_wrapper", did=True, args=tuple(), kwargs={"event":1, "origin_queue": queue})
-		_test_func(self=self, obj=actor, func_name="_Actor__consume_post_processing", did=True, args=tuple(), kwargs={"event":2, "destination_queues":[queue]})
+		actor.start()
+		sleep(0)
+		_test_func(self=self, obj=actor, func_name="_Actor__consume_pre_processing", did=True, args=tuple(), kwargs={"event":event1, "origin_queue": queue}, count=1)
+		_test_func(self=self, obj=actor, func_name="_Actor__consume_wrapper", did=True, args=tuple(), kwargs={"event":1, "origin_queue": queue}, count=1)
+		_test_func(self=self, obj=actor, func_name="_Actor__consume_post_processing", did=True, args=tuple(), kwargs={"event":2, "destination_queues":[queue]}, count=1)
 	
 	def test__Actor__do_consume_4(self):
 		#test QueueFull without wait
@@ -892,7 +882,7 @@ class TestActor(unittest.TestCase):
 		actor._Actor__consume_post_processing = raise_exception_func(exception=Exception)
 		_test_func(self=self, obj=actor, func_name="_Actor__send_error", did=False, args=None, kwargs=None)
 		actor._Actor__do_consume(event=event, origin_queue=None)
-		_test_func(self=self, obj=actor, func_name="_Actor__send_error", did=True, args=tuple(), kwargs={"event":event})
+		_test_func(self=self, obj=actor, func_name="_Actor__send_error", did=True, args=tuple(), kwargs={"event":event}, count=1)
 
 	def test__Actor__do_consume_6(self):
 		#as is

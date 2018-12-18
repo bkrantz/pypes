@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-from pypes.util.async import AsyncContextManager
+from pypes.util.async import AsyncContextManager, sleep
 from pypes.globals.async import get_async_manager
 from pypes.event import Event, BaseEvent
 from pypes.metas.actor import ActorMeta
@@ -97,13 +97,12 @@ class Actor(AsyncContextManager):
         return hash(raw)
 
     def __consumer(self, origin_queue, timeout=10, *args, **kwargs):
-        self.wait_for_running()
         #run loop
         while self.is_running():
             origin_queue.wait_until_content()
             self.__try_spawn_consume(origin_queue=origin_queue, timeout=timeout)
-            get_async_manager().sleep(0)
-        get_async_manager().sleep(0)
+            sleep()
+        sleep()
 
     def __try_spawn_consume(self, origin_queue, timeout=None):
         try:

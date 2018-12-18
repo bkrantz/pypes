@@ -147,7 +147,6 @@ class EventTimingMixin:
     @timeout.setter
     def timeout(self, timeout):
         self.__timing["timeout"] = timeout
-
     
     @property
     def created(self):
@@ -156,7 +155,7 @@ class EventTimingMixin:
     @created.setter
     def created(self, timestamp):
         if not self.created is None:
-            raise InvalidEventDataModification("Cannot alter created timestamp once it has been set.")
+            raise InvalidEventModification("Cannot alter created timestamp once it has been set.")
         else:
             self.__timing["created"] = timestamp
 
