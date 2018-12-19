@@ -45,7 +45,7 @@ class Logger(object):
 
         for key in self.__pool.iterkeys():
             try:
-                log_event = LogEvent(level, self.name, message, id=log_entry_id)
+                log_event = LogEvent(log_level=level, log_origin_actor=self.name, log_message=message)
                 self.__pool[key].put(log_event)
             except QueueFull:
                 self.__pool.wait_until_free()

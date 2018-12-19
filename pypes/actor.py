@@ -9,6 +9,7 @@ from pypes.util.queue import QueuePool, Queue
 from pypes.util.logger import Logger
 from pypes.util.errors import (QueueConnected, InvalidActorOutput, QueueEmpty, InvalidEventConversion, InvalidActorInput, QueueFull, PypesException)
 import time
+from pypes.globals.event import get_event_manager
 
 __all__ = [
     "Actor"
@@ -84,7 +85,7 @@ class Actor(AsyncContextManager):
     def __loop_send(self, event, destination_queues):
         event_func = lambda event: event
         if len(destination_queues) > 1:
-            event.add_split(self.__generate_split_id(event=event))
+            event.splits.append(self.__generate_split_id(event=event))
             event_func = lambda event: event.clone()
         
         with ignored(AttributeError):
@@ -114,8 +115,9 @@ class Actor(AsyncContextManager):
 
     def __consume_pre_processing(self, event, origin_queue):
         try:
-            if not event.isInstance(convert_to=self.input):
-                new_event = event.convert(self.input)
+
+            if not get_event_manager().is_instance(event=event, convert_to=self.input):
+                new_event = get_event_manager().convert(event=event, convert_to=self.input)
                 self.logger.warning("Incoming event was of type '{_type}' when type {input} was expected. Converted to {converted}".format(
                     _type=type(event), input=self.input, converted=type(new_event)), event=event)
                 event = new_event
@@ -130,11 +132,11 @@ class Actor(AsyncContextManager):
         except InvalidActorInput as err:
             self.logger.error("Invalid input detected: {0}".format(err))
             raise err
-        event.timeout_check()
+        event.pre_consume_hooks(actor_name=self.name)
         return event
 
     def __consume_post_processing(self, event, destination_queues):
-        event.timeout_check()
+        event.post_consume_hooks(actor_name=self.name)
         if not event.isInstance(convert_to=self.output):
             raise_error = True
             if self.convert_output:

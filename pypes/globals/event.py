@@ -6,26 +6,27 @@ from pypes.util.errors import (ResourceNotModified, MalformedEventData, InvalidE
     UnauthorizedEvent, ForbiddenEvent, ResourceNotFound, EventCommandNotAllowed, ActorTimeout, ResourceConflict,
     ResourceGone, UnprocessableEventData, EventRateExceeded, PypesException, ServiceUnavailable)
 from pypes import import_restriction
-
+from pypes.util.event import EventManager
 __all__ = []
 
 if __name__.startswith(import_restriction):
     __all__ += [
         "DEFAULT_SERVICE",
         "DEFAULT_STATUS_CODE",
+        "DEFAULT_LOG_FILENAME",
         "HTTPStatusMap",
         "HTTPStatuses",
-        "get_conversion_method_manager"
+        "get_event_manager"
     ]
 
 DEFAULT_SERVICE = "default"
 DEFAULT_STATUS_CODE = 200
+DEFAULT_LOG_FILENAME = "compysition.log"
 
 HTTPStatusMap = collections.defaultdict(lambda: {"status": 500},
     {
         ResourceNotModified:            {"status": 304},
         MalformedEventData:             {"status": 400},
-        InvalidEventDataModification:   {"status": 400},
         InvalidEventModification:       {"status": 400},
         UnauthorizedEvent:              {"status": 401,
             "headers": {'WWW-Authenticate': 'Basic realm="Compysition Server"'}},
@@ -73,11 +74,10 @@ HTTPStatuses = {
     508: "Loop Detected",
 }
 
-__conversion_methods_obj = None
+__event_manager = None
 
-def get_conversion_method_manager():
-    global __conversion_methods_obj
-    if __conversion_methods_obj is None:
-        from pypes.util.event import ConversionMethods
-        __conversion_methods_obj = ConversionMethods()
-    return __conversion_methods_obj
+def get_event_manager():
+    global __event_manager
+    if __event_manager is None:
+        __event_manager = EventManager()
+    return __event_manager

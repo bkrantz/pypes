@@ -4,7 +4,8 @@ import collections
 from lxml import etree
 
 from pypes import import_restriction
-
+from pypes.util.errors import InvalidEventDataModification, InvalidEventConversion
+'''
 __all__ = []
 
 if __name__.startswith(import_restriction):
@@ -12,29 +13,86 @@ if __name__.startswith(import_restriction):
         "ConversionMethods",
         "get_conversion_methods"
     ]
+'''
+#event data type definitions
+class JSONType: pass
+class XMLType: pass
+class StringType: pass
+class DefaultType: pass
 
-class ConversionMethods:
-    _XML_TYPES = [etree._Element, etree._ElementTree, etree._XSLTResultTree]
-    _JSON_TYPES = [dict, list, collections.OrderedDict]
+class EventManager:
+    __XML_TYPES = [etree._Element, etree._ElementTree, etree._XSLTResultTree]
+    __JSON_TYPES = [dict, list, collections.OrderedDict]
 
-    __compy_wrapper_key = "compy_conversion_wrapper"
-    __compy_json_type_key = "@compy_json_type"
+    __pypes_xml_wrapper_key = "pypes_conversion_wrapper"
+    __pypes_json_type_key = "@pypes_json_type"
 
-    def get_conversion_methods(self, conv_type=None):
-        if conv_type == "XML":
-            conversion_methods = {str: lambda data: etree.fromstring(data)}
-            conversion_methods.update(dict.fromkeys(self._XML_TYPES, lambda data: data))
-            conversion_methods.update(dict.fromkeys(self._JSON_TYPES, lambda data: etree.fromstring(xmltodict.unparse(self.__internal_xmlify(data)).encode('utf-8'))))
-            conversion_methods.update({None.__class__: lambda data: etree.fromstring("<root/>")})
-            return conversion_methods
-        elif conv_type == "JSON":
-            conversion_methods = {str: lambda data: json.loads(data)}
-            conversion_methods.update(dict.fromkeys(self._JSON_TYPES, lambda data: json.loads(json.dumps(data, default=self.decimal_default))))
-            conversion_methods.update(dict.fromkeys(self._XML_TYPES, lambda data: self.__remove_internal_xmlify(xmltodict.parse(etree.tostring(data), expat=expat))))
-            conversion_methods.update({None.__class__: lambda data: {}})
-            return conversion_methods
-        else:
-            return collections.defaultdict(lambda: lambda data: data)
+    __xml_conversion_methods = {str: lambda data: etree.fromstring(data)}
+    __xml_conversion_methods.update(dict.fromkeys(__XML_TYPES, lambda data: data))
+    __xml_conversion_methods.update(dict.fromkeys(__JSON_TYPES, lambda data: etree.fromstring(xmltodict.unparse(self.__internal_xmlify(data)).encode('utf-8'))))
+    __xml_conversion_methods.update({None.__class__: lambda data: etree.fromstring("<%s/>" % __pypes_xml_wrapper_key)})
+    __json_conversion_methods = {str: lambda data: json.loads(data)}
+    __json_conversion_methods.update(dict.fromkeys(__JSON_TYPES, lambda data: json.loads(json.dumps(data, default=self.__decimal_default))))
+    __json_conversion_methods.update(dict.fromkeys(__XML_TYPES, lambda data: self.__remove_internal_xmlify(xmltodict.parse(etree.tostring(data), expat=expat))))
+    __json_conversion_methods.update({None.__class__: lambda data: {}})
+    __string_conversion_methods = {str: lambda data: data}
+    __string_conversion_methods.update(dict.fromkeys(__JSON_TYPES, lambda data: json.dumps(data, default=self.__decimal_default)))
+    __string_conversion_methods.update(dict.fromkeys(__XML_TYPES, lambda data: etree.tostring(data)))
+    __string_conversion_methods.update({None.__class__: lambda data: ""})
+    __default_conversion_methods = collections.defaultdict(lambda: lambda data: data)
+
+    convert_to_xml = lambda value: __xml_conversion_methods[value.__class__](data=value)
+    convert_to_json = lambda value: __json_conversion_methods[value.__class__](data=value)
+    convert_to_string = lambda value: __string_conversion_methods[value.__class__](data=value)
+    convert_to_default = lambda value: __default_conversion_methods[value.__class__](data=value)
+
+    __conversion_types = {
+        JSONType: convert_to_json,
+        XMLType: convert_to_xml,
+        StringType: convert_to_string,
+        DefaultType: convert_to_default
+    }
+
+    def is_xml_type(self, clazz):
+        return clazz in EventManager.__XML_TYPES
+
+    def format_error(self, event):
+        if not event.error is None:
+            messages = [{"message": message} for message in event.error.message]
+            obj = {"errors":{"error": messages}}
+            return self.ensure_formating(event=event, new_value=obj)
+        return None
+
+    def stringify(self, new_value):
+        self.convert_to_string(value=new_value)
+
+    def ensure_formating(self, event, new_value):
+        try:
+            return EventManager.__conversion_types[event._format_type](value=new_value)
+        except KeyError:
+            raise InvalidEventDataModification("Data of type '{_type}' was not valid for event type {cls}: {err}".format(_type=type(data), cls=self.__class__, err=traceback.format_exc()))
+        except ValueError as err:
+            raise InvalidEventDataModification("Malformed data: {err}".format(err=err))
+        except Exception as err:
+            raise InvalidEventDataModification("Unknown error occurred on modification: {err}".format(err=err))
+
+    def convert(self, event, convert_to):
+        if not self.is_instance(event=event, convert_to=convert_to):
+            try:
+                new_event = convert_to.__new__(cls=convert_to)
+                new_event.__dict__.update(event.__dict__)
+                new_event.data = event.data
+            except Exception:
+                raise InvalidEventConversion("Unable to convert event. <Attempted {old} -> {new}>".format(old=event.__class__, new=convert_to))
+            else:
+                return new_event
+        return event
+
+    def is_instance(self, event, convert_to):
+        for base in convert_to.__bases__:
+            if not issubclass(event.__class__, base):
+                return False
+        return True
 
     def __internal_xmlify(self, _json):
         if isinstance(_json, dict) and len(_json) == 0:
@@ -55,7 +113,7 @@ class ConversionMethods:
         return _json
 
     def __json_get_value_of_dict(self, dict_obj):
-        text = dict_obj.get("#text", None)
+        text = dict_obj.get(EventManager.__xml_to_json_attr_key, None)
         if text is None or len(dict_obj) > 1:
             return dict_obj
         else:
@@ -110,7 +168,10 @@ class ConversionMethods:
                 _json[key] = self.__json_conversion_crawl_nested(_json=value)
         return _json
 
-    def decimal_default(self, obj):
+    def __decimal_default(self, obj):
         if isinstance(obj, Decimal):
             return float(obj)
         raise TypeError
+
+    def get_timestamp(self):
+        return time.time()

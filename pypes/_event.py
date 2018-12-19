@@ -1,26 +1,185 @@
+import logging
 
-class EventFormatter:
-	def convert(self, event, target_event_class):
-		pass
 
-	def convert_data(self, event):
-		pass
+#event data type definitions
+class JSONType: pass
+class XMLType: pass
+class StringType: pass
+class DefaultType: pass
 
-	def is_instance(self, event, event_class):
-		pass
+class EventFormatMixin:
+    _format_type = DefaultType
 
-__event_formatter = None
+class XMLEventFormatMixin(EventFormatMixin):
+    _format_type = XMLType
 
-def get_event_formatter():
-	global __event_formatter
-	if __event_formatter is None:
-		__event_formatter = EventFormatter()
-	return __event_formatter
+class JSONEventFormatMixin(EventFormatMixin):
+    _format_type = JSONType
+
+class StringEventFormatMixin(EventFormatMixin):
+    _format_type = StringType
+
+class EventManager:
+    __XML_TYPES = [etree._Element, etree._ElementTree, etree._XSLTResultTree]
+    __JSON_TYPES = [dict, list, collections.OrderedDict]
+
+    __pypes_xml_wrapper_key = "pypes_conversion_wrapper"
+    __pypes_json_type_key = "@pypes_json_type"
+
+    __xml_conversion_methods = {str: lambda data: etree.fromstring(data)}
+    __xml_conversion_methods.update(dict.fromkeys(EventManager.__XML_TYPES, lambda data: data))
+    __xml_conversion_methods.update(dict.fromkeys(EventManager.__JSON_TYPES, lambda data: etree.fromstring(xmltodict.unparse(self.__internal_xmlify(data)).encode('utf-8'))))
+    __xml_conversion_methods.update({None.__class__: lambda data: etree.fromstring("<%s/>" % EventManager.__pypes_xml_wrapper_key)})
+    __json_conversion_methods = {str: lambda data: json.loads(data)}
+    __json_conversion_methods.update(dict.fromkeys(EventManager.__JSON_TYPES, lambda data: json.loads(json.dumps(data, default=self.__decimal_default))))
+    __json_conversion_methods.update(dict.fromkeys(EventManager.__XML_TYPES, lambda data: self.__remove_internal_xmlify(xmltodict.parse(etree.tostring(data), expat=expat))))
+    __json_conversion_methods.update({None.__class__: lambda data: {}})
+    __string_conversion_methods = {str: lambda data: data}
+    __string_conversion_methods.update(dict.fromkeys(EventManager.__JSON_TYPES, lambda data: json.dumps(data, default=self.__decimal_default)))
+    __string_conversion_methods.update(dict.fromkeys(EventManager.__XML_TYPES, lambda data: etree.tostring(data)))
+    __string_conversion_methods.update({None.__class__: lambda data: ""})
+    __default_conversion_methods = collections.defaultdict(lambda: lambda data: data)
+
+    convert_to_xml = lambda value: EventManager.__xml_conversion_methods[value.__class__](data=value)
+    convert_to_json = lambda value: EventManager.__json_conversion_methods[value.__class__](data=value)
+    convert_to_string = lambda value: EventManager.__string_conversion_methods[value.__class__](data=value)
+    convert_to_default = lambda value: EventManager.__default_conversion_methods[value.__class__](data=value)
+
+    __conversion_types = {
+        JSONType: EventManager.convert_to_json,
+        XMLType: EventManager.convert_to_xml,
+        StringType: EventManager.convert_to_string
+        DefaultType: EventManager.convert_to_default
+    }
+
+    def is_xml_type(self, clazz):
+        return clazz in EventManager.__XML_TYPES
+
+    def format_error(self, event):
+        if not event.error is None:
+            messages = [{"message": message} for message in event.error.message]
+            obj = {"errors":{"error": messages}}
+            return self.ensure_formating(event=event, new_value=obj)
+        return None
+
+    def stringify(self, new_value):
+        self.convert_to_string(value=new_value)
+
+    def ensure_formating(self, event, new_value):
+        try:
+            return EventManager.__conversion_types[event._format_type](value=new_value)
+        except KeyError:
+            raise InvalidEventDataModification("Data of type '{_type}' was not valid for event type {cls}: {err}".format(_type=type(data), cls=self.__class__, err=traceback.format_exc()))
+        except ValueError as err:
+            raise InvalidEventDataModification("Malformed data: {err}".format(err=err))
+        except Exception as err:
+            raise InvalidEventDataModification("Unknown error occurred on modification: {err}".format(err=err))
+
+	def convert(self, event, convert_to):
+		if not self.is_instance(event=event, convert_to=convert_to):
+            try:
+                new_event = convert_to.__new__(cls=convert_to)
+                new_event.__dict__.update(event.__dict__)
+                new_event.data = event.data
+            except Exception:
+                raise InvalidEventConversion("Unable to convert event. <Attempted {old} -> {new}>".format(old=event.__class__, new=convert_to))
+            else:
+                return new_event
+        return event
+
+	def is_instance(self, event, convert_to):
+        for base in convert_to.__bases__:
+            if not issubclass(event.__class__, base):
+                return False
+        return True
+
+    def __internal_xmlify(self, _json):
+        if isinstance(_json, dict) and len(_json) == 0:
+            _json = {self.__compy_wrapper_key: {}}
+        if isinstance(_json, list) or len(_json) > 1:
+            _json = {self.__compy_wrapper_key: _json}
+        _, value = next(iter(_json.items()))
+        if isinstance(value, list):
+            _json = {self.__compy_wrapper_key: _json}
+        return _json
+
+    def __remove_internal_xmlify(self, _json):
+        if len(_json) == 1 and isinstance(_json, dict):
+            key, value = next(iter(_json.items()))
+            if key == self.__compy_wrapper_key:
+                _json = value
+        self.__json_conversion_crawl(_json)
+        return _json
+
+    def __json_get_value_of_dict(self, dict_obj):
+        text = dict_obj.get(EventManager.__xml_to_json_attr_key, None)
+        if text is None or len(dict_obj) > 1:
+            return dict_obj
+        else:
+            return text
+
+    def __json_conversion_crawl_nested(self, _json):
+        if isinstance(_json, dict):
+            for key, value in _json.items():
+                _json[key] = self.__json_conversion_crawl_nested(_json=value)
+            json_type = _json.pop(self.__compy_json_type_key, None)
+            if json_type == "list":
+                new_obj = self.__json_get_value_of_dict(dict_obj=_json)
+                if new_obj is None or (isinstance(new_obj, dict) and len(new_obj) == 0):
+                    return []
+                return [new_obj]
+            elif json_type == "string":
+                new_value = self.__json_get_value_of_dict(dict_obj=value)
+                if isinstance(new_value, (dict, list)):
+                    return json.dumps(new_value)
+                else:
+                    return new_value
+            elif json_type == "dict":
+                return _json
+            elif json_type is not None:
+                return None
+            return _json
+        elif isinstance(_json, list):
+            for index, value in enumerate(_json):
+                if isinstance(value, dict):
+                    for key, sub_value in value.items():
+                        value[key] = self.__json_conversion_crawl_nested(_json=sub_value)
+                    json_type = value.pop(self.__compy_json_type_key, None)
+                    if json_type == "list":
+                        _json[index] = self.__json_get_value_of_dict(dict_obj=value)
+                    elif json_type == "string":
+                        new_value = self.__json_get_value_of_dict(dict_obj=value)
+                        if isinstance(new_value, (dict, list)):
+                            _json[index] = json.dumps(new_value)
+                        else:
+                            _json[index] = new_value
+                    elif json_type == "dict":
+                        _json[index] = None
+                    else:
+                        _json[index] = value
+                else:
+                    _json[index] = self.__json_conversion_crawl_nested(_json=value)
+        return _json
+
+    def __json_conversion_crawl(self, _json):
+        if isinstance(_json, dict):
+            for key, value in _json.items():
+                _json[key] = self.__json_conversion_crawl_nested(_json=value)
+        return _json
+
+    def __decimal_default(self, obj):
+        if isinstance(obj, Decimal):
+            return float(obj)
+        raise TypeError
+
+    def get_timestamp(self):
+        return time.time()
 
 class BaseEvent(object):
-	_init_hooks = []
+	_build_hooks = []
 	_pre_consume_hooks = []
 	_post_consume_hooks = []
+    __pickled_xml_attr = "pickled_xml_attrs"
 
 	def __init__(self, data=None, service=None, *args, **kwargs):
 		self._service = service
@@ -28,22 +187,37 @@ class BaseEvent(object):
 		self._data = data
 		self._error = None
 		self.splits = list()
-		self._created = self.__get_timestamp()
-		args, kwargs = self.__process_hooks(hooks=self._init_hooks, cascade=True, *args, **kwargs)
+		self._created = timestamp()
 		self.__dict__.update(kwargs)
+
+    def __new__(cls, *args, **kwargs):
+        instance = super(BaseEvent, cls).__new__(cls)
+        instance.build(*args, **kwargs)
+        return instance
+
+    def build(self, *args, **kwargs):
+        self.__process_hooks(hooks=self._build_hooks, *args, **kwargs)
 
 	def __process_hooks(self, hooks, cascade=False, *args, **kwargs):
 		for hook in hooks:
 			with ignored(AttributeError):
-				returns = getattr(self, hook)(*args, **kwargs)
-				args, kwargs = returns if cascade else (args, kwargs)
-		return args, kwargs
+				getattr(self, hook)(*args, **kwargs)
 
 	def pre_consume_hooks(self, *args, **kwargs):
-		return self.__process_hooks(hooks=self._pre_consume_hooks, cascade=False, *args, **kwargs)
+		self.__process_hooks(hooks=self._pre_consume_hooks, *args, **kwargs)
 
 	def post_consume_hooks(self, *args, **kwargs):
-		return self.__process_hooks(hooks=self._post_consume_hooks, cascade=False, *args, **kwargs)
+		self.__process_hooks(hooks=self._post_consume_hooks, *args, **kwargs)
+
+    def set(self, key, value):
+        try:
+            setattr(self, key, value)
+            return True
+        except Exception:
+            return False
+
+    def get(self, key, default=None):
+        return getattr(self, key, default)
 
     @property
     def service(self):
@@ -59,14 +233,7 @@ class BaseEvent(object):
 
     @data.setter
     def data(self, data):
-        try:
-            self._data = self.conversion_methods[data.__class__](data)
-        except KeyError:
-            raise InvalidEventDataModification("Data of type '{_type}' was not valid for event type {cls}: {err}".format(_type=type(data), cls=self.__class__, err=traceback.format_exc()))
-        except ValueError as err:
-            raise InvalidEventDataModification("Malformed data: {err}".format(err=err))
-        except Exception as err:
-            raise InvalidEventDataModification("Unknown error occurred on modification: {err}".format(err=err))
+        self._data = get_event_formatter().ensure_formating(event=self, new_value=data)
 
 	@property
     def created(self):
@@ -75,7 +242,7 @@ class BaseEvent(object):
     @created.setter
     def created(self, timestamp):
         if not self._created is None:
-            raise InvalidEventModification("Cannot alter created timestamp once it has been set.")
+            raise InvalidEventModification(message="Cannot alter created timestamp once it has been set.")
         else:
             self._created = timestamp
 
@@ -86,7 +253,7 @@ class BaseEvent(object):
     @event_id.setter
     def event_id(self, id):
         if not self._event_id is None:
-            raise InvalidEventModification("Cannot alter event_id once it has been set.")
+            raise InvalidEventModification(message="Cannot alter event_id once it has been set.")
         else:
             self._event_id = id
 
@@ -96,25 +263,46 @@ class BaseEvent(object):
 
     @error.setter
     def error(self, exception):
-        self._error = exception
+        self._set_error(exception=exception)
+
+    def _set_error(self, exception):
+        self._error = exception if isinstance(exception, PypesException) else PypesException(message="Internal Error")
 
     @property
-    def formated_error(self):
-    	
-	def _get_timestamp(self,):
-        return time.time()
+    def format_error(self):
+        return get_event_formatter().format_error(event=self)
 
+    @property
+    def data_string(self):
+        return get_event_formatter().stringify(new_value=self._data)
 
-def EventTimingMixin:
+    def __getstate__(self):
+        pickle_dict = dict(self.__dict__)
+        pickled_xml_attrs = []
+        for key, value in pickle_dict:
+            if get_event_formatter().is_xml_type(clazz=value.__class__):
+                pickled_xml_attrs.append(key)
+                pickle_dict[key] = get_event_formatter().convert_to_string(value=value)
+        pickle_dict[BaseEvent.__pickled_xml_attr] = pickled_xml_attrs
+        return pickle_dict
 
-	_init_hooks = ["timing_init"]
-	_pre_consume_hooks = ["set_started", "timeout_check"]
-	_post_consume_hooks = ["set_ended", "timeout_check"]
+    def __setstate__(self, state):
+        pickled_xml_attrs = pickle_dict[BaseEvent.__pickled_xml_attr]
+        del pickle_dict[BaseEvent.__pickled_xml_attr]
+        for key in pickled_xml_attrs:
+            pickle_dict[key] = get_event_formatter().convert_to_xml(value=pickle_dict[key])
+        self.__dict__ = state
 
-	def timing_init(self, timing=None, timeout=None, *args, **kwargs):
-		self._timing = dict() if timing is None else timing
-		if not timeout is None: self.timeout = timeout
-		return args, kwargs
+    def __str__(self):
+        return str(self.__getstate__())
+
+    def clone(self):
+        return deepcopy(self)
+
+def TimingEventMixin:
+
+    def build_timing(self):
+        self._timing = dict()
 
 	#properties
     @property
@@ -150,185 +338,78 @@ def EventTimingMixin:
         return self._timing.get("actors", {}).get(actor_name, {}).get("ended", None)
     
     def set_ended(self, actor_name, *args, **kwargs):
-        timestamp = self._get_timestamp()
+        timestamp = timestamp()
         self._timing["actors"] = self._timing.get("actors", {})
         actor_obj = self._timing["actors"].get(actor_name, {})
         actor_obj["ended"] = timestamp
         self._timing["actors"][actor_name] = actor_obj
         self.__set_elapsed(timestamp=timestamp)
-        return args, kwargs
 
     def set_started(self, actor_name, *args, **kwargs):
-        timestamp = self._get_timestamp()
+        timestamp = timestamp()
         self._timing["actors"] = self._timing.get("actors", {})
         actor_obj = self._timing["actors"].get(actor_name, {})
         actor_obj["started"] = timestamp
         self._timing["actors"][actor_name] = actor_obj
         self.__set_elapsed(timestamp=timestamp)
-        return args, kwargs
 
     #misc funcs
     def timeout_check(self, *args, **kwargs):
         timeout, elapsed = self.timeout, self.elapsed
         if not timeout is None and timeout <= elapsed and timeout > 0:
             raise ActorTimeout("Timeout exceeded: Processing took longer than expected")
-        return args, kwargs
 
+class LogEventMixin:
 
-
-class BaseEvent(object):
-    _builders
-    _pre_consume_hooks
-    _pos_consume_hooks
-
-    def __init__(self, meta_id=None, data=None, service=None, *args, **kwargs):
-        self.service = service
-        self.event_id = uuid().get_hex()
-        self.meta_id = meta_id if meta_id else self.event_id
-        self._data = None
-        self.data = data
-        self.error = None
-        self._timing_init()
-        self.__dict__.update(kwargs)
-        self._splits = list()
-
-    def get_splits(self):
-        return self._splits
-
-    def add_split(self, key):
-        self._splits.append(key)
-
-    def set(self, key, value):
-        try:
-            setattr(self, key, value)
-            return True
-        except Exception:
-            return False
-
-    def get(self, key, default=None):
-        return getattr(self, key, default)
-
-    @property
-    def service(self):
-        return self._service
-
-    @service.setter
-    def service(self, service):
-        self._set_service(service)
-
-    def _set_service(self, service):
-        self._service = service
-        if self._service == None:
-            self._service = DEFAULT_SERVICE
-
-    @property
-    def data(self):
-        return self._data
-
-    @data.setter
-    def data(self, data):
-        try:
-            self._data = self.conversion_methods[data.__class__](data)
-        except KeyError:
-            raise InvalidEventDataModification("Data of type '{_type}' was not valid for event type {cls}: {err}".format(_type=type(data), cls=self.__class__, err=traceback.format_exc()))
-        except ValueError as err:
-            raise InvalidEventDataModification("Malformed data: {err}".format(err=err))
-        except Exception as err:
-            raise InvalidEventDataModification("Unknown error occurred on modification: {err}".format(err=err))
-
-    @property
-    def event_id(self):
-        return self._event_id
-
-    @event_id.setter
-    def event_id(self, event_id):
-        if self.get("_event_id", None) is not None:
-            raise InvalidEventDataModification("Cannot alter event_id once it has been set. A new event must be created")
-        else:
-            self._event_id = event_id
-
-    def get_properties(self):
-        return {k: v for k, v in self.__dict__.iteritems() if k != "data" and k != "_data"}
-
-    def __getstate__(self):
-        return self._get_state()
-
-    def __setstate__(self, state):
-        self.__dict__ = state
-        self.data = state.get('_data', None)
-        self.error = state.get('_error', None)
-
-    def __str__(self):
-        return str(self.__getstate__())
-
-    @property
-    def error(self):
-        return self._error
-
-    @error.setter
-    def error(self, exception):
-        self._set_error(exception)
-
-    def _set_error(self, exception):
-        self._error = exception
-
-    def clone(self):
-        return deepcopy(self)
-
-class BaseLogEvent(BaseEvent):
-    def __init__(self, level, origin_actor, message, id=None, *args, **kwargs):
-        super(BaseLogEvent, self).__init__(*args, **kwargs)
-        self.id = id
-        self.level = level
-        self.time = datetime.now().strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]
-        self.origin_actor = origin_actor
-        self.message = message
-        self.data = {
-            "id":              self.id,
-            "level":            self.level,
-            "time":             self.time,
-            "origin_actor":     self.origin_actor,
-            "message":          self.message
+    def build_logging(self, *args, **kwargs):
+        self._logging = {
+            "level": logging.DEBUG,
+            "origin_actor": None,
+            "filename": DEFAULT_LOG_FILENAME,
+            "time": datetime.now().strftime('%Y-%m-%d %H:%M:%S,%f')[:-3],
+            "message": ""
         }
 
-class BaseDict(dict):
-    _keys = []
+    @property
+    def log_level(self):
+        return self._logging.get("level", None)
 
-    def __init__(self, *args, **kwargs):
-        for key in BaseDict._keys:
-            setattr(self, key, getattr(kwargs, key, None))
+    @log_level.setter
+    def log_level(self, level):
+        self._logging.set("level", level if isinstance(level, (logging.CRITICAL, logging.ERROR, logging.WARN, logging.INFO)) else logging.DEBUG)
 
-class HttpRequest(BaseDict):
-    _keys = ["headers", "method"]
+    @property
+    def log_origin_actor(self):
+        return self._logging.get("origin_actor", None)
 
+    @log_origin_actor.setter
+    def log_origin_actor(self, actor):
+        self._logging.set("origin_actor", actor)
 
-class HttpEnvironment(BaseDict):
+    @property
+    def log_filename(self):
+        return self._logging.get("filename", None)
 
+    @log_filename.setter
+    def log_filename(self, actor):
+        self._logging.set("filename", actor)
 
-class HttpEnvironment(dict):
-    def __init__(self, *args, **kwargs):
+    @property
+    def log_message(self):
+        return self._logging.get("message", None)
 
-class BaseHttpEvent(BaseEvent):
-    def __init__(self, environment={}, *args, **kwargs):
-        self._ensure_environment(environment)
-        super(BaseHttpEvent, self).__init__(*args, **kwargs)
+    @log_message.setter
+    def log_message(self, actor):
+        self._logging.set("message", actor)
 
-    def __recursive_update(self, d, u):
-        for k, v in u.iteritems():
-            if isinstance(v, collections.Mapping):
-                d[k] = self.__recursive_update(d.get(k, {}), v)
-            else:
-                d[k] = v
-        return d
+    @property
+    def log_time(self):
+        return self._logging.get("time", None)
+    
+class HttpEventMixin:
 
-    def _set_service(self, service):
-        if service is None:
-            service = self.environment["request"]["url"]["path_args"].get("queue", None)
-        super(BaseHttpEvent, self)._set_service(service=service)
-
-    def _ensure_environment(self, environment):
-        if self.get("environment", None) is None:
-            self.environment = {
+    def build_environment(self, *args, **kwargs):
+        self._environment = {
                 "request": {
                     "headers": {},
                     "method": None,
@@ -356,11 +437,30 @@ class BaseHttpEvent(BaseEvent):
                 },
                 "accepted_methods": []
             }
-        self.environment = self.__recursive_update(self.environment, environment)
+
+    @property
+    def environment(self):
+        return self._environment
+    
+    @property
+    def request_headers(self):
+        return self._environment.get("request", {}).get("headers", {})
+
+    @request_headers.setter
+    def request_headers(self, headers):
+        self._environment["request"]["headers"] = headers
+
+    @property
+    def response_headers(self):
+        return self._environment.get("response", {}).get("headers", {})
+
+    @response_headers.setter
+    def response_headers(self, headers):
+        self._environment["response"]["headers"] = headers
 
     @property
     def status(self):
-        return self.environment["response"]["status"]
+        return self._environment["response"]["status"]
 
     @status.setter
     def status(self, status):
@@ -371,20 +471,77 @@ class BaseHttpEvent(BaseEvent):
         except KeyError, AttributeError:
             raise InvalidEventModification("Unrecognized status code")
         else:
-            self.environment["response"]["status"] = status
-
-    def update_headers(self, headers={}, **kwargs):
-        self.environment["response"]["headers"].update(headers)
-        self.environment["response"]["headers"].update(kwargs)
+            self._environment["response"]["status"] = status
 
     def _set_error(self, exception):
         if exception is not None:
             error_state = HTTPStatusMap[exception.__class__]
             self.status = error_state.get("status", None)
-            self.update_headers(headers=error_state.get("headers", {}))
-        super(BaseHttpEvent, self)._set_error(exception)
+            response_headers = self.response_headers
+            response_headers.update(error_state.get("headers", {}))
+            self.response_headers(headers=response_headers)
+        super(BaseHttpEvent, self)._set_error(exception=exception)
 
-class Event(EventFormatMixin, EventTimingMixin, BaseEvent):
+__event_mixin_hooks = collections.defaultdict(lambda: {},
+    {
+        TimingEventMixin: {
+            "_build_hooks" = ["build_timing"]
+            "_pre_consume_hooks" = ["set_started", "timeout_check"]
+            "_post_consume_hooks" = ["set_ended", "timeout_check"]
+        },
+        LogEventMixin: {
+            "_build_hooks" = ["build_logging"]
+        },
+        HttpEventMixin: {
+            "_build_hooks" = ["build_environment"]
+        }
+    }
+)
+
+__data_format_mixins = {
+    EventFormatMixin: "Default",
+    XMLEventFormatMixin: "XML",
+    JSONEventFormatMixin: "JSON",
+    StringEventFormatMixin: "String"
+}
+
+__universal_mixins = [
+    TimingEventMixin: "Timing",
+    LogEventMixin: "Log",
+    HttpEventMixin: "Http"
+]
+
+__all__ = []
+for data_mixin, descriptor in __data_format_mixins.iteritems():
+    # for each permutation of universal mixins
+    for comb_length in xrange(0, len(stuff)+1):
+        for subset in itertools.permutations(stuff, comb_length):
+            class_name = descriptor
+            current_build_hooks, current_pre_consume_hooks, current_post_consume_hooks = [], [], []
+            for mixin in subset:
+                class_name += __universal_mixins[mixin]
+                current_build_hooks.extend(__event_mixin_hooks[mixin].get("_build_hooks", []))
+                current_pre_consume_hooks.extend(__event_mixin_hooks[mixin].get("_pre_consume_hooks", []))
+                current_post_consume_hooks.extend(__event_mixin_hooks[mixin].get("_post_consume_hooks", []))
+            class_name += "Event"
+            parent_classes = (data_mixin,) + subset + (BaseEvent,)
+
+            __all__.append(
+                type(
+                    class_name, 
+                    parent_classes, 
+                    {
+                        "_build_hooks": current_build_hooks,
+                        "_pre_consume_hooks": current_pre_consume_hooks,
+                        "_post_consume_hooks": current_post_consume_hooks,
+                    })
+                )
+print __all__
+
+
+
+'''
+class Event(EventFormatMixin, BaseEvent):
     conversion_parents = []
 
 class LogEvent(EventFormatMixin, EventTimingMixin, BaseLogEvent):
@@ -404,3 +561,4 @@ class JSONEvent(JSONEventFormatMixin, EventTimingMixin, BaseEvent):
 
 class JSONHttpEvent(JSONEventFormatMixin, EventTimingMixin, BaseHttpEvent):
     conversion_parents = [Event, HttpEvent]
+'''

@@ -5,7 +5,7 @@ import gevent
 from pypes import import_restriction
 from pypes.util import ignored
 import signal
-
+import time
 from gevent.pool import Pool
 from gevent.greenlet import Greenlet
 from greenlet import GreenletExit
@@ -25,6 +25,9 @@ if __name__.startswith(import_restriction):
 def sleep(duration=DEFAULT_SLEEP_INTERVAL, *args, **kwargs):
     gevent.sleep(duration, *args, **kwargs)
 
+def timestamp():
+    return time.time()
+    
 class BreakoutException(Exception):
     pass
 
