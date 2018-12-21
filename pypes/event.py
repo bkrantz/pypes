@@ -126,7 +126,7 @@ class BaseEvent(object):
 
     def __str__(self):
         return str(self.__getstate__())
-
+        
     def clone(self):
         return deepcopy(self)
 

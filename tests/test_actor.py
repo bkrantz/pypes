@@ -2,7 +2,7 @@ from pypes.actor import Actor
 from pypes.event import Event, HttpEvent, JSONEvent, XMLEvent
 from pypes.globals.async import get_restart_pool, get_async_manager
 from pypes.util.queue import QueuePool, Queue
-from pypes.testutils import funcs_tester, _test_func
+pypes.testutils importself=self,  funcs_tester, _test_func, _test_meta_func_error
 from pypes.util import remove_dupes, raise_exception_func
 from pypes.util.logger import Logger
 from pypes.util.errors import (QueueConnected, InvalidActorOutput, QueueEmpty, InvalidEventConversion, InvalidActorInput, QueueFull, PypesException)
@@ -29,7 +29,7 @@ class TestActor(unittest.TestCase):
 		global MockedActor
 		MockedActor = None
 
-	def _test_meta_func_error(self, root_clazz=object, func_names=[], *args, **kwargs):
+	test_meta_func_error(sself=self, elf, root_clazz=object, func_names=[], *args, **kwargs):
 		attrs_dict = {func_name:lambda x: x for func_name in func_names}
 		with self.assertRaises(TypeError):
 			BadActor = type('BadActor', (root_clazz, object), attrs_dict)
@@ -78,25 +78,28 @@ class TestActor(unittest.TestCase):
 		GoodActor = type('GoodActor', (GoodActor, object), {"input":HttpEvent})
 		GoodActor = type('GoodActor', (GoodActor, object), {"output":HttpEvent})
 
-		self._test_meta_func_error(root_clazz=Actor) #missing consume
+		_test_meta_func_error(self=self, root_clazz=Actor) #missing consume
 		#func override tests
-		self._test_meta_func_error(root_clazz=GoodActor, func_names=["_Actor__connect_queue"]) 
-		self._test_meta_func_error(root_clazz=GoodActor, func_names=["_Actor__register_consumer"])
-		self._test_meta_func_error(root_clazz=GoodActor, func_names=["_Actor__loop_send"])
-		self._test_meta_func_error(root_clazz=GoodActor, func_names=["_Actor__generate_split_id"])
-		self._test_meta_func_error(root_clazz=GoodActor, func_names=["_Actor__try_spawn_consume"])
-		self._test_meta_func_error(root_clazz=GoodActor, func_names=["_Actor__consumer"])
-		self._test_meta_func_error(root_clazz=GoodActor, func_names=["_Actor__consume_pre_processing"])
-		self._test_meta_func_error(root_clazz=GoodActor, func_names=["_Actor__consume_post_processing"])
-		self._test_meta_func_error(root_clazz=GoodActor, func_names=["_Actor__consume_wrapper"])
-		self._test_meta_func_error(root_clazz=GoodActor, func_names=["_Actor__do_consume"])
-		self._test_meta_func_error(root_clazz=GoodActor, func_names=["_Actor__send_event"])
-		self._test_meta_func_error(root_clazz=GoodActor, func_names=["_Actor__send_error"])
-		self._test_meta_func_error(root_clazz=GoodActor, func_names=["create_event"])
-		self._test_meta_func_error(root_clazz=GoodActor, func_names=["connect_error_queue"])
-		self._test_meta_func_error(root_clazz=GoodActor, func_names=["connect_queue"])
-		self._test_meta_func_error(root_clazz=GoodActor, func_names=["start"])
-		self._test_meta_func_error(root_clazz=GoodActor, func_names=["stop"])
+		_test_meta_func_error(self=self, root_clazz=GoodActor, func_names=["_Actor__connect_queue"]) 
+		_test_meta_func_error(self=self, root_clazz=GoodActor, func_names=["_Actor__register_consumer"])
+		_test_meta_func_error(self=self, root_clazz=GoodActor, func_names=["_Actor__loop_send"])
+		_test_meta_func_error(self=self, root_clazz=GoodActor, func_names=["_Actor__generate_split_id"])
+		_test_meta_func_error(self=self, root_clazz=GoodActor, func_names=["_Actor__consumer"])
+		_test_meta_func_error(self=self, root_clazz=GoodActor, func_names=["_Actor__try_spawn_consume"])
+		_test_meta_func_error(self=self, root_clazz=GoodActor, func_names=["_Actor__consume_pre_processing"])
+		_test_meta_func_error(self=self, root_clazz=GoodActor, func_names=["_Actor__consume_post_processing"])
+		_test_meta_func_error(self=self, root_clazz=GoodActor, func_names=["_Actor__consume_wrapper"])
+		_test_meta_func_error(self=self, root_clazz=GoodActor, func_names=["_Actor__format_event"])
+		_test_meta_func_error(self=self, root_clazz=GoodActor, func_names=["_Actor__format_queues"])
+		_test_meta_func_error(self=self, root_clazz=GoodActor, func_names=["_Actor__do_consume"])
+		_test_meta_func_error(self=self, root_clazz=GoodActor, func_names=["_Actor__send_event"])
+		_test_meta_func_error(self=self, root_clazz=GoodActor, func_names=["_Actor__send_error"])
+		_test_meta_func_error(self=self, root_clazz=GoodActor, func_names=["create_event"])
+		_test_meta_func_error(self=self, root_clazz=GoodActor, func_names=["connect_error_queue"])
+		_test_meta_func_error(self=self, root_clazz=GoodActor, func_names=["connect_log_queue"])
+		_test_meta_func_error(self=self, root_clazz=GoodActor, func_names=["connect_queue"])
+		_test_meta_func_error(self=self, root_clazz=GoodActor, func_names=["start"])
+		_test_meta_func_error(self=self, root_clazz=GoodActor, func_names=["stop"])
 
 		#test I/O vars
 		with self.assertRaises(TypeError):
@@ -696,12 +699,12 @@ class TestActor(unittest.TestCase):
 			new_event = actor._Actor__consume_pre_processing(event=event, origin_queue=Queue("queue_name"))
 		
 	def test__Actor__consume_pre_processing_5(self):
-		#test timeout_check
-		actor, event = MockedActor(name='actor_name'), funcs_tester(clazz=Event, func_definitions={"timeout_check":None})()
+		#test pre_consume_hooks
+		actor, event = MockedActor(name='actor_name'), funcs_tester(clazz=Event, func_definitions={"pre_consume_hooks":None})()
 		actor.input = event.__class__
-		_test_func(self=self, obj=event, func_name="timeout_check", did=False, args=None, kwargs=None)
+		_test_func(self=self, obj=event, func_name="pre_consume_hooks", did=False, args=None, kwargs=None)
 		new_event = actor._Actor__consume_pre_processing(event=event, origin_queue=Queue("queue_name"))
-		_test_func(self=self, obj=new_event, func_name="timeout_check", did=True, args=tuple(), kwargs=dict(), count=1)
+		_test_func(self=self, obj=new_event, func_name="pre_consume_hooks", did=True, args=tuple(), kwargs={"actor_name": "actor_name"}, count=1)
 
 	###################################
 	# _Actor__consume_post_processing #
@@ -737,12 +740,12 @@ class TestActor(unittest.TestCase):
 			new_event = actor._Actor__consume_post_processing(event=event, destination_queues=Queue("queue_name"))
 
 	def test__Actor__consume_post_processing_4(self):
-		#test timeout_check
-		actor, event = MockedActor(name='actor_name'), funcs_tester(clazz=Event, func_definitions={"timeout_check":None})()
+		#test post_consume_hooks
+		actor, event = MockedActor(name='actor_name'), funcs_tester(clazz=Event, func_definitions={"post_consume_hooks":None})()
 		actor.output = event.__class__
-		_test_func(self=self, obj=event, func_name="timeout_check", did=False, args=None, kwargs=None)
+		_test_func(self=self, obj=event, func_name="post_consume_hooks", did=False, args=None, kwargs=None)
 		new_event = actor._Actor__consume_post_processing(event=event, destination_queues=Queue("queue_name"))
-		_test_func(self=self, obj=new_event, func_name="timeout_check", did=True, args=tuple(), kwargs=dict(), count=1)
+		_test_func(self=self, obj=new_event, func_name="post_consume_hooks", did=True, args=tuple(), kwargs={"actor_name": "actor_name"}, count=1)
 
 	###########################
 	# _Actor__consume_wrapper #

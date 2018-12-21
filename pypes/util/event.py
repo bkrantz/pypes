@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 import collections
-
+import json
 from lxml import etree
 
 from pypes import import_restriction
@@ -41,10 +41,10 @@ class EventManager:
     __string_conversion_methods.update({None.__class__: lambda data: ""})
     __default_conversion_methods = collections.defaultdict(lambda: lambda data: data)
 
-    convert_to_xml = lambda value: __xml_conversion_methods[value.__class__](data=value)
-    convert_to_json = lambda value: __json_conversion_methods[value.__class__](data=value)
-    convert_to_string = lambda value: __string_conversion_methods[value.__class__](data=value)
-    convert_to_default = lambda value: __default_conversion_methods[value.__class__](data=value)
+    convert_to_xml = lambda self, value: self.__xml_conversion_methods[value.__class__](data=value)
+    convert_to_json = lambda self, value: self.__json_conversion_methods[value.__class__](data=value)
+    convert_to_string = lambda self, value: self.__string_conversion_methods[value.__class__](data=value)
+    convert_to_default = lambda self, value: self.__default_conversion_methods[value.__class__](data=value)
 
     __conversion_types = {
         JSONType: convert_to_json,
@@ -68,7 +68,7 @@ class EventManager:
 
     def ensure_formating(self, event, new_value):
         try:
-            return EventManager.__conversion_types[event._format_type](value=new_value)
+            return self.__conversion_types[event._format_type](self=self, value=new_value)
         except KeyError:
             raise InvalidEventDataModification("Data of type '{_type}' was not valid for event type {cls}: {err}".format(_type=type(data), cls=self.__class__, err=traceback.format_exc()))
         except ValueError as err:
@@ -82,7 +82,7 @@ class EventManager:
                 new_event = convert_to.__new__(cls=convert_to)
                 new_event.__dict__.update(event.__dict__)
                 new_event.data = event.data
-            except Exception:
+            except Exception as err:
                 raise InvalidEventConversion("Unable to convert event. <Attempted {old} -> {new}>".format(old=event.__class__, new=convert_to))
             else:
                 return new_event

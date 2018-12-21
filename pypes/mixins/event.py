@@ -17,7 +17,7 @@ from pypes import import_restriction
 from pypes.globals.event import get_event_manager
 from pypes.util.event import DefaultType, XMLType, JSONType, StringType
 from pypes.util.async import timestamp
-from pypes.globals.event import DEFAULT_LOG_FILENAME
+from pypes.globals.event import DEFAULT_LOG_FILENAME, DEFAULT_STATUS_CODE
 from datetime import datetime
 
 __all__ = []

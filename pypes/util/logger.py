@@ -41,7 +41,7 @@ class Logger(object):
         """
         if not log_entry_id:
             if event:
-                log_entry_id = event.meta_id
+                log_entry_id = event.event_id
 
         for key in self.__pool.iterkeys():
             try:

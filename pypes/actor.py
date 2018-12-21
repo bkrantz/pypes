@@ -137,12 +137,12 @@ class Actor(AsyncContextManager):
 
     def __consume_post_processing(self, event, destination_queues):
         event.post_consume_hooks(actor_name=self.name)
-        if not event.isInstance(convert_to=self.output):
+        if not get_event_manager().is_instance(event=event, convert_to=self.output):
             raise_error = True
             if self.convert_output:
                 raise_error = False
                 try:
-                    new_event = event.convert(self.output)
+                    new_event = get_event_manager().convert(event=event, convert_to=self.output)
                     self.logger.warning("Outgoing event was of type '{_type}' when type {output} was expected. Converted to {converted}".format(
                         _type=type(event), output=self.output, converted=type(new_event)), event=event)
                     event = new_event

@@ -11,8 +11,9 @@ if __name__.startswith(import_restriction):
 	]
 
 class ActorMeta(AsyncMeta):
+	__root_name = "Actor"
+
 	def __new__(cls, name, bases, body):
-		root_name = "Actor"
 		force_derivative_funcs = ["consume"]
 		ignore_derivative_funcs = ["_Actor__connect_queue", "_Actor__register_consumer", "_Actor__loop_send", 
 		"_Actor__generate_split_id", "_Actor__consumer", "_Actor__try_spawn_consume", "_Actor__consume_pre_processing",
@@ -22,18 +23,18 @@ class ActorMeta(AsyncMeta):
 
 		#force derivative implementations
 		for attr in force_derivative_funcs:
-			force_derivative_attr(name=name, body=body, bases=bases, root_class_name=root_name, attr_name=attr)
-			force_class_ignore(name=name, body=body, bases=bases, root_class_name=root_name, attr_name=attr)
+			force_derivative_attr(name=name, body=body, bases=bases, root_class_name=_root_name, attr_name=attr)
+			force_class_ignore(name=name, body=body, bases=bases, root_class_name=_root_name, attr_name=attr)
 			force_attr_instance(body=body, attr_name=attr, clazz=types.FunctionType, name=name)
 
 		#ignore derivative implementations
 		for attr in ignore_derivative_funcs:
-			force_class_attr(name=name, body=body, bases=bases, root_class_name=root_name, attr_name=attr)
-			force_derivative_ignore(name=name, body=body, bases=bases, root_class_name=root_name, attr_name=attr)
+			force_class_attr(name=name, body=body, bases=bases, root_class_name=_root_name, attr_name=attr)
+			force_derivative_ignore(name=name, body=body, bases=bases, root_class_name=_root_name, attr_name=attr)
 			force_attr_instance(body=body, attr_name=attr, clazz=types.FunctionType, name=name)
 
 		#force types
 		force_attr_subclass(body=body, attr_name="input", clazz=BaseEvent, name=name)
 		force_attr_subclass(body=body, attr_name="output", clazz=BaseEvent, name=name)
 
-		return AsyncMeta.__new__(cls, name, bases, body, root_name=root_name)
+		return AsyncMeta.__new__(cls, name, bases, body)
