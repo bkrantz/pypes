@@ -8,7 +8,8 @@ from pypes.util import RedirectStdStreams
 import gevent
 import os
 from pypes.metas.async import IgnoreDerivativesMeta
-import gevent.exceptions.LoopExit as LoopExit
+from gevent.hub import LoopExit
+# import LoopExit
 
 class TestSleep(BaseUnitTest):
 	def test_sleep(self):
@@ -42,312 +43,180 @@ class TestAsyncManager(BaseUnitTest):
 			class Deriv(AsyncManager):
 				pass
 
+	def test_interupt_signal(self):
+		_override_async_manager(manager=AsyncManager())
+		assert get_async_manager().stopped
+		assert not get_async_manager().running
+		with get_async_manager():
+			assert not get_async_manager().stopped
+			assert get_async_manager().running
+			os.kill(os.getpid(), signal.SIGINT); sleep()
+			assert get_async_manager().stopped
+			assert not get_async_manager().running
+
+	def test_termination_signal(self):
+		_override_async_manager(manager=AsyncManager())
+		assert get_async_manager().stopped
+		assert not get_async_manager().running
+		with get_async_manager():
+			assert not get_async_manager().stopped
+			assert get_async_manager().running
+			os.kill(os.getpid(), signal.SIGTERM); sleep()
+			assert get_async_manager().stopped
+			assert not get_async_manager().running
+
 	def test_init(self):
-		_override_async_manager(manager=AsyncManager())
-		self.assertEquals(get_async_manager().is_stopped, True)
-		get_async_manager()._AsyncManager__stopped.clear()
-		self.assertEquals(get_async_manager().is_stopped, False)
-		os.kill(os.getpid(), signal.SIGINT)
-		sleep(duration=.1)
-		self.assertEquals(get_async_manager().is_stopped, True)
+		assert isinstance(get_async_manager()._AsyncManager__managers, dict)
+		assert len(get_async_manager()._AsyncManager__managers) == 0
+		assert get_async_manager().stopped
+		assert not get_async_manager().running
 
-		_override_async_manager(manager=AsyncManager())
-		self.assertEquals(get_async_manager().is_stopped, True)
-		get_async_manager()._AsyncManager__stopped.clear()
-		self.assertEquals(get_async_manager().is_stopped, False)
-		os.kill(os.getpid(), signal.SIGTERM)
-		sleep(duration=.1)
-		self.assertEquals(get_async_manager().is_stopped, True)
-
-		self.assertEqual(isinstance(get_async_manager()._AsyncManager__managers, dict), True)
-		self.assertEqual(len(get_async_manager()._AsyncManager__managers), 0)
-
-	def test__AsyncManager__pop_stopping_threads(self):
-		#test initially stopped
-		MockAsyncManager = funcs_tester(clazz=AsyncManager, func_definitions={"sleep": None})
-		_override_async_manager(manager=MockAsyncManager())
-		self.assertEquals(get_async_manager().is_stopped, True)
-		get_async_manager()._AsyncManager__pop_stopping_threads()
-		self.assertEquals(get_async_manager().is_stopped, True)
-
-		_override_async_manager(manager=MockAsyncManager())
-		MockEvent = funcs_tester(clazz=get_async_manager()._AsyncManager__stopped.__class__, func_definitions={"set":None,"clear":None})
-		get_async_manager()._AsyncManager__stopped = MockEvent()
-		get_async_manager()._AsyncManager__stopped._flag = True
-		self.assertEquals(get_async_manager().is_stopped, True)
-		_test_func(self=self, obj=get_async_manager()._AsyncManager__stopped, func_name="set", did=False, args=None, kwargs=None, count=0)
-		_test_func(self=self, obj=get_async_manager()._AsyncManager__stopped, func_name="clear", did=False, args=None, kwargs=None, count=0)
-		get_async_manager()._AsyncManager__pop_stopping_threads()
-		_test_func(self=self, obj=get_async_manager()._AsyncManager__stopped, func_name="set", did=True, args=tuple(), kwargs=dict(), count=1)
-		_test_func(self=self, obj=get_async_manager()._AsyncManager__stopped, func_name="clear", did=False, args=None, kwargs=None, count=0)
-		self.assertEquals(get_async_manager().is_stopped, True)
-
-		#test initially running
-		_override_async_manager(manager=MockAsyncManager())
-		get_async_manager()._AsyncManager__stopped._flag = False
-		self.assertEquals(get_async_manager().is_stopped, False)
-		get_async_manager()._AsyncManager__pop_stopping_threads()
-		self.assertEquals(get_async_manager().is_stopped, False)
-
-		_override_async_manager(manager=MockAsyncManager())
-		get_async_manager()._AsyncManager__stopped = MockEvent()
-		self.assertEquals(get_async_manager().is_stopped, False)
-		_test_func(self=self, obj=get_async_manager()._AsyncManager__stopped, func_name="set", did=False, args=None, kwargs=None, count=0)
-		_test_func(self=self, obj=get_async_manager()._AsyncManager__stopped, func_name="clear", did=False, args=None, kwargs=None, count=0)
-		get_async_manager()._AsyncManager__pop_stopping_threads()
-		_test_func(self=self, obj=get_async_manager()._AsyncManager__stopped, func_name="set", did=True, args=tuple(), kwargs=dict(), count=1)
-		_test_func(self=self, obj=get_async_manager()._AsyncManager__stopped, func_name="clear", did=True, args=tuple(), kwargs=dict(), count=1)
-		self.assertEquals(get_async_manager().is_stopped, False)
-
-	def test_add_context_manager(self):
-		#test not AsyncManager manager
-		_override_async_manager(manager=AsyncManager())
-		with self.assertRaises(AssertionError):
-			get_async_manager().add_context_manager(key="some random characters", manager="not a context manager")
-
+	def test_create_context_manager_1(self):
 		#test success while stopped
-		MockAsyncManager = funcs_tester(clazz=AsyncManager, func_definitions={"_AsyncManager__try_start_single": None})
-		_override_async_manager(manager=MockAsyncManager())
-		self.assertEquals(len(get_async_manager()._AsyncManager__managers), 0)
+		_override_async_manager(manager=AsyncManager())
+		assert len(get_async_manager()._AsyncManager__managers) == 0
+		assert get_async_manager().stopped
 		manager = AsyncContextManager()
-		self.assertEquals(len(get_async_manager()._AsyncManager__managers), 1)
-		self.assertEquals(get_async_manager().is_stopped, True)
-		_test_func(self=self, obj=get_async_manager(), func_name="_AsyncManager__try_start_single", did=False, args=None, kwargs=None, count=0)
-		get_async_manager().add_context_manager(key="some random characters", manager=manager)
-		self.assertEquals(len(get_async_manager()._AsyncManager__managers), 2)
-		_test_func(self=self, obj=get_async_manager(), func_name="_AsyncManager__try_start_single", did=False, args=None, kwargs=None, count=0)
-		self.assertEquals(get_async_manager().is_stopped, True)
-		managers = get_async_manager()._AsyncManager__managers.values()
-		self.assertEqual(managers[0], managers[1])
+		assert len(get_async_manager()._AsyncManager__managers) == 1
+		assert get_async_manager().stopped
+		assert get_async_manager()._AsyncManager__managers.values()[0] == manager
+		assert manager.stopped
 
+	def test_create_context_manager_2(self):
 		#test success while running
-		MockAsyncManager = funcs_tester(clazz=AsyncManager, func_definitions={"_AsyncManager__try_start_single": None})
-		_override_async_manager(manager=MockAsyncManager())
-		manager = AsyncContextManager()
-		get_async_manager()._AsyncManager__stopped.clear()
-		self.assertEquals(get_async_manager().is_stopped, False)
-		self.assertEquals(len(get_async_manager()._AsyncManager__managers), 1)
-		_test_func(self=self, obj=get_async_manager(), func_name="_AsyncManager__try_start_single", did=False, args=None, kwargs=None, count=0)
-		get_async_manager().add_context_manager(key="some random characters", manager=manager)
-		self.assertEquals(len(get_async_manager()._AsyncManager__managers), 2)
-		_test_func(self=self, obj=get_async_manager(), func_name="_AsyncManager__try_start_single", did=True, args=tuple(), kwargs={"manager":manager}, count=1)
-		self.assertEquals(get_async_manager().is_stopped, False)
-		
-	def test_remove_context_manager(self):
+		_override_async_manager(manager=AsyncManager())
+		assert len(get_async_manager()._AsyncManager__managers) == 0
+		assert get_async_manager().stopped
+		with get_async_manager():
+			assert get_async_manager().running
+			assert len(get_async_manager()._AsyncManager__managers) == 0
+			manager = AsyncContextManager()
+			assert len(get_async_manager()._AsyncManager__managers) == 1
+			assert get_async_manager().running
+			assert get_async_manager()._AsyncManager__managers.values()[0] == manager
+			assert manager.stopped
+			sleep(0)
+			assert manager.running
+			get_async_manager().trigger_stop()
+
+	def test_remove_context_manager_1(self):
 		#test success while stopped
-		MockAsyncManager = funcs_tester(clazz=AsyncManager, func_definitions={"_AsyncManager__try_stop_single": None,"_AsyncManager__pop_stopping_threads": None})
-		manager = AsyncContextManager()
-		_override_async_manager(manager=MockAsyncManager())
-		self.assertEquals(get_async_manager().is_stopped, True)
-		self.assertEquals(len(get_async_manager()._AsyncManager__managers), 0)
-		get_async_manager().add_context_manager(key="1", manager=manager)
-		self.assertEquals(len(get_async_manager()._AsyncManager__managers), 1)
-		_test_func(self=self, obj=get_async_manager(), func_name="_AsyncManager__try_stop_single", did=False, args=None, kwargs=None, count=0)
-		_test_func(self=self, obj=get_async_manager(), func_name="_AsyncManager__pop_stopping_threads", did=False, args=None, kwargs=None, count=0)
+		_override_async_manager(manager=AsyncManager())
+		assert get_async_manager().stopped
+		assert len(get_async_manager()) == 0
+		manager = AsyncContextManager(async_hidden_key="1")
+		assert get_async_manager().stopped
+		assert len(get_async_manager()) == 1
 		get_async_manager().remove_context_manager(key="1")
-		_test_func(self=self, obj=get_async_manager(), func_name="_AsyncManager__try_stop_single", did=False, args=None, kwargs=None, count=0)
-		_test_func(self=self, obj=get_async_manager(), func_name="_AsyncManager__pop_stopping_threads", did=False, args=None, kwargs=None, count=0)
-		self.assertEquals(len(get_async_manager()._AsyncManager__managers), 0)
-		self.assertEquals(get_async_manager().is_stopped, True)
+		assert len(get_async_manager()) == 0
+		assert get_async_manager().stopped
 
+	def test_remove_context_manager_2(self):
 		#test success while running
-		MockAsyncManager = funcs_tester(clazz=AsyncManager, func_definitions={"_AsyncManager__try_stop_single": None,"_AsyncManager__pop_stopping_threads": None})
-		manager = AsyncContextManager()
-		_override_async_manager(manager=MockAsyncManager())
-		get_async_manager()._AsyncManager__stopped.clear()
-		self.assertEquals(get_async_manager().is_stopped, False)
-		self.assertEquals(len(get_async_manager()._AsyncManager__managers), 0)
-		get_async_manager().add_context_manager(key="1", manager=manager)
-		self.assertEquals(len(get_async_manager()._AsyncManager__managers), 1)
-		_test_func(self=self, obj=get_async_manager(), func_name="_AsyncManager__try_stop_single", did=False, args=None, kwargs=None, count=0)
-		_test_func(self=self, obj=get_async_manager(), func_name="_AsyncManager__pop_stopping_threads", did=False, args=None, kwargs=None, count=0)
-		get_async_manager().remove_context_manager(key="1")
-		_test_func(self=self, obj=get_async_manager(), func_name="_AsyncManager__try_stop_single", did=True, args=tuple(), kwargs={"manager":manager}, count=1)
-		_test_func(self=self, obj=get_async_manager(), func_name="_AsyncManager__pop_stopping_threads", did=True, args=tuple(), kwargs=dict(), count=1)
-		self.assertEquals(len(get_async_manager()._AsyncManager__managers), 0)
-		self.assertEquals(get_async_manager().is_stopped, False)
+		_override_async_manager(manager=AsyncManager())
+		assert get_async_manager().stopped
+		assert len(get_async_manager()) == 0
+		manager = AsyncContextManager(async_hidden_key="1")
+		assert len(get_async_manager()) == 1
+		assert get_async_manager().stopped
+		assert manager.stopped
+		with get_async_manager():
+			assert get_async_manager().running
+			assert not manager.running
+			sleep(0)
+			assert manager.running
+			get_async_manager().remove_context_manager(key="1")
+			assert len(get_async_manager()) == 0
+			assert get_async_manager().running
+			assert manager.stopped
+			get_async_manager().trigger_stop()
 
+	def test_remove_context_manager_3(self):
 		#test missing key while stopped
-		MockAsyncManager = funcs_tester(clazz=AsyncManager, func_definitions={"_AsyncManager__try_stop_single": None,"_AsyncManager__pop_stopping_threads": None})
-		manager = AsyncContextManager()
-		_override_async_manager(manager=MockAsyncManager())
-		self.assertEquals(get_async_manager().is_stopped, True)
-		self.assertEquals(len(get_async_manager()._AsyncManager__managers), 0)
-		get_async_manager().add_context_manager(key="1", manager=manager)
-		self.assertEquals(len(get_async_manager()._AsyncManager__managers), 1)
-		_test_func(self=self, obj=get_async_manager(), func_name="_AsyncManager__try_stop_single", did=False, args=None, kwargs=None, count=0)
-		_test_func(self=self, obj=get_async_manager(), func_name="_AsyncManager__pop_stopping_threads", did=False, args=None, kwargs=None, count=0)
+		_override_async_manager(manager=AsyncManager())
+		assert get_async_manager().stopped
+		assert len(get_async_manager()) == 0
+		manager = AsyncContextManager(async_hidden_key="1")
+		assert get_async_manager().stopped
+		assert len(get_async_manager()) == 1
 		get_async_manager().remove_context_manager(key="2")
-		_test_func(self=self, obj=get_async_manager(), func_name="_AsyncManager__try_stop_single", did=False, args=None, kwargs=None, count=0)
-		_test_func(self=self, obj=get_async_manager(), func_name="_AsyncManager__pop_stopping_threads", did=False, args=None, kwargs=None, count=0)
-		self.assertEquals(len(get_async_manager()._AsyncManager__managers), 1)
-		self.assertEquals(get_async_manager().is_stopped, True)
-
+		assert len(get_async_manager()) == 1
+		assert get_async_manager().stopped
+	
+	def test_remove_context_manager_4(self):
 		#test missing key while running
-		MockAsyncManager = funcs_tester(clazz=AsyncManager, func_definitions={"_AsyncManager__try_stop_single": None,"_AsyncManager__pop_stopping_threads": None})
-		manager = AsyncContextManager()
-		_override_async_manager(manager=MockAsyncManager())
-		get_async_manager()._AsyncManager__stopped.clear()
-		self.assertEquals(get_async_manager().is_stopped, False)
-		self.assertEquals(len(get_async_manager()._AsyncManager__managers), 0)
-		get_async_manager().add_context_manager(key="1", manager=manager)
-		self.assertEquals(len(get_async_manager()._AsyncManager__managers), 1)
-		_test_func(self=self, obj=get_async_manager(), func_name="_AsyncManager__try_stop_single", did=False, args=None, kwargs=None, count=0)
-		_test_func(self=self, obj=get_async_manager(), func_name="_AsyncManager__pop_stopping_threads", did=False, args=None, kwargs=None, count=0)
-		get_async_manager().remove_context_manager(key="2")
-		_test_func(self=self, obj=get_async_manager(), func_name="_AsyncManager__try_stop_single", did=False, args=None, kwargs=None, count=0)
-		_test_func(self=self, obj=get_async_manager(), func_name="_AsyncManager__pop_stopping_threads", did=False, args=None, kwargs=None, count=0)
-		self.assertEquals(len(get_async_manager()._AsyncManager__managers), 1)
-		self.assertEquals(get_async_manager().is_stopped, False)
-
-	def test__AsyncManager__try_stop_single(self):
-		#test manager is running
 		_override_async_manager(manager=AsyncManager())
-		manager = AsyncContextManager()
-		manager._AsyncContextManager__running.set()
-		manager._AsyncContextManager__stopped.clear()
-		self.assertEqual(manager._AsyncContextManager__running.is_set(), True)
-		self.assertEqual(manager._AsyncContextManager__stopped.is_set(), False)
-		get_async_manager()._AsyncManager__try_stop_single(manager=manager)
-		self.assertEqual(manager._AsyncContextManager__running.is_set(), True)
-		self.assertEqual(manager._AsyncContextManager__stopped.is_set(), True)
+		assert get_async_manager().stopped
+		assert len(get_async_manager()) == 0
+		manager = AsyncContextManager(async_hidden_key="1")
+		assert len(get_async_manager()) == 1
+		assert get_async_manager().stopped
+		assert manager.stopped
+		with get_async_manager():
+			assert get_async_manager().running
+			assert not manager.running
+			sleep(0)
+			assert manager.running
+			get_async_manager().remove_context_manager(key="2")
+			assert len(get_async_manager()) == 1
+			assert get_async_manager().running
+			assert manager.running
+			get_async_manager().trigger_stop()
 
-		_override_async_manager(manager=AsyncManager())
-		manager = AsyncContextManager()
-		manager._AsyncContextManager__running.set()
-		manager._AsyncContextManager__stopped.set()
-		self.assertEqual(manager._AsyncContextManager__running.is_set(), True)
-		self.assertEqual(manager._AsyncContextManager__stopped.is_set(), True)
-		get_async_manager()._AsyncManager__try_stop_single(manager=manager)
-		self.assertEqual(manager._AsyncContextManager__running.is_set(), True)
-		self.assertEqual(manager._AsyncContextManager__stopped.is_set(), True)
-
-		#test manager is not running
-		_override_async_manager(manager=AsyncManager())
-		manager = AsyncContextManager()
-		manager._AsyncContextManager__running.clear()
-		manager._AsyncContextManager__stopped.clear()
-		self.assertEqual(manager._AsyncContextManager__running.is_set(), False)
-		self.assertEqual(manager._AsyncContextManager__stopped.is_set(), False)
-		get_async_manager()._AsyncManager__try_stop_single(manager=manager)
-		self.assertEqual(manager._AsyncContextManager__running.is_set(), False)
-		self.assertEqual(manager._AsyncContextManager__stopped.is_set(), False)
-
-	def test__AsyncManager__try_start_single(self):
-		#test manager is running
-		MockAsyncManager = funcs_tester(clazz=AsyncManager, func_definitions={"_AsyncManager__single_start": None})
-		_override_async_manager(manager=MockAsyncManager())
-		manager = AsyncContextManager()
-		manager._AsyncContextManager__running.clear()
-		self.assertEqual(manager._AsyncContextManager__running.is_set(), False)
-		self.assertEqual(len(get_restart_pool().greenlets), 0)
-		get_async_manager()._AsyncManager__try_start_single(manager=manager)
-		self.assertEqual(manager._AsyncContextManager__running.is_set(), False)
-		self.assertEqual(len(get_restart_pool().greenlets), 1)
-		_test_func(self=self, obj=get_async_manager(), func_name="_AsyncManager__single_start", did=False, args=None, kwargs=None, count=0)
-		sleep()
-		_test_func(self=self, obj=get_async_manager(), func_name="_AsyncManager__single_start", did=True, args=tuple(), kwargs={"manager":manager}, count=1)
-
-		#test manager is not running
-		get_restart_pool().kill()
-		_override_async_manager(manager=MockAsyncManager())
-		manager = AsyncContextManager()
-		manager._AsyncContextManager__running.set()
-		self.assertEqual(manager._AsyncContextManager__running.is_set(), True)
-		self.assertEqual(len(get_restart_pool().greenlets), 0)
-		get_async_manager()._AsyncManager__try_start_single(manager=manager)
-		self.assertEqual(manager._AsyncContextManager__running.is_set(), True)
-		self.assertEqual(len(get_restart_pool().greenlets), 0)
-		_test_func(self=self, obj=get_async_manager(), func_name="_AsyncManager__single_start", did=False, args=None, kwargs=None, count=0)
-		sleep()
-		_test_func(self=self, obj=get_async_manager(), func_name="_AsyncManager__single_start", did=False, args=None, kwargs=None, count=0)
-
-	def test__AsyncManager__single_start(self):
-		_override_async_manager(manager=AsyncManager())
-		manager = AsyncContextManager()
-		self.assertEqual(len(get_restart_pool().greenlets), 0)
-		get_restart_pool().spawn(run=get_async_manager()._AsyncManager__single_start, manager=manager, greenlet_manager=manager, graceful_restart=False, rough_restart=False)
-		self.assertEqual(len(get_restart_pool().greenlets), 1)
-		self.assertEqual(manager.is_running(), False)
-		sleep()
-		self.assertEqual(manager.is_running(), True)
-		get_async_manager().trigger_stop()
-		self.assertEqual(manager.is_running(), True)
-		sleep()
-		self.assertEqual(manager.is_running(), True)
-		get_async_manager()._AsyncManager__stopped.clear()
-		manager.trigger_stop()
-		self.assertEqual(manager.is_running(), True)
-		sleep()
-		self.assertEqual(manager.is_running(), True)
-		get_async_manager().trigger_stop()
-		self.assertEqual(manager.is_running(), True)
-		self.assertEqual(len(get_restart_pool().greenlets), 1)
-		sleep(); sleep()
-		self.assertEqual(len(get_restart_pool().greenlets), 0)
-
-	def test_stop_funcs(self):
-		_override_async_manager(manager=AsyncManager())
-		self.assertEqual(get_async_manager().is_stopped, True)
-		get_async_manager()._AsyncManager__stopped.clear()
-		self.assertEqual(get_async_manager().is_stopped, False)
-		get_async_manager().trigger_stop()
-		self.assertEqual(get_async_manager().is_stopped, True)
-
-		get_async_manager()._AsyncManager__stopped.clear()
-		self.assertEqual(len(get_restart_pool().greenlets), 0)
-		manager = AsyncContextManager()
-		self.assertEqual(len(get_restart_pool().greenlets), 1)
-		get_restart_pool().spawn(run=get_async_manager().wait_for_stop, greenlet_manager=manager, graceful_restart=False, rough_restart=False)
-		self.assertEqual(len(get_restart_pool().greenlets), 2)
-		sleep(); sleep()
-		self.assertEqual(len(get_restart_pool().greenlets), 2)
-		get_async_manager().trigger_stop()
-		sleep(); sleep()
-		self.assertEqual(len(get_restart_pool().greenlets), 1)
+	def test_wait_for_stop(self):
+		def some_func():
+			sleep(.05)
+			get_async_manager().trigger_stop()
+		get_restart_pool().spawn(run=some_func, greenlet_manager=AsyncContextManager(), graceful_restart=False, rough_restart=False)
+		start = timestamp()
+		with get_async_manager():
+			get_async_manager().wait_for_stop()
+		end = timestamp()
+		dif = end - start
+		assert dif > 0.04 and dif < 0.06
 
 	def test_context_manager(self):
 		#expected usage
 		_override_async_manager(manager=AsyncManager())
-		self.assertEqual(len(get_async_manager()._AsyncManager__managers), 0)
-		self.assertEqual(len(get_restart_pool().greenlets), 0)
+		assert len(get_async_manager()) == 0
+		assert len(get_restart_pool().greenlets) == 0
 		AsyncContextManager(async_hidden_key="1"); AsyncContextManager(async_hidden_key="2"); AsyncContextManager(async_hidden_key="3")
-		self.assertEqual(len(get_restart_pool().greenlets), 0)
-		self.assertEqual(len(get_async_manager()._AsyncManager__managers), 3)
-		for manager in get_async_manager()._AsyncManager__managers.itervalues():
-			self.assertEqual(manager.is_running(), False)
+		assert len(get_restart_pool().greenlets) == 0
+		assert len(get_async_manager()) == 3
+		for key, manager in get_async_manager():
+			assert manager.stopped
 		with get_async_manager():
-			self.assertEqual(len(get_restart_pool().greenlets), 3)
-			for manager in get_async_manager()._AsyncManager__managers.itervalues():
-				self.assertEqual(manager.is_running(), False)
+			assert len(get_restart_pool().greenlets) == 3
+			for key, manager in get_async_manager():
+				assert manager.stopped
 			sleep() #allows managers to start  # typically would be a block here
-			self.assertEqual(len(get_restart_pool().greenlets), 3)
-			for manager in get_async_manager()._AsyncManager__managers.itervalues():
-				self.assertEqual(manager.is_running(), True)
+			assert len(get_restart_pool().greenlets) == 3
+			for key, manager in get_async_manager():
+				assert manager.running
 			get_async_manager().trigger_stop()
-		self.assertEqual(len(get_restart_pool().greenlets), 0)
-		self.assertEqual(len(get_restart_pool().greenlets), 0)
-		for manager in get_async_manager()._AsyncManager__managers.itervalues():
-			self.assertEqual(manager.is_running(), False)
+		assert len(get_restart_pool().greenlets) == 0
+		for key, manager in get_async_manager():
+			assert manager.stopped
 
-		#restart restartablity
-		self.assertEqual(len(get_restart_pool().greenlets), 0)
-		self.assertEqual(len(get_async_manager()._AsyncManager__managers), 3)
-		for manager in get_async_manager()._AsyncManager__managers.itervalues():
-			self.assertEqual(manager.is_running(), False)
+		#restartablity
+		assert len(get_restart_pool().greenlets) == 0
+		assert len(get_async_manager()) == 3
+		for key, manager in get_async_manager():
+			assert manager.stopped
 		with get_async_manager():
-			self.assertEqual(len(get_restart_pool().greenlets), 3)
-			for manager in get_async_manager()._AsyncManager__managers.itervalues():
-				self.assertEqual(manager.is_running(), False)
+			assert len(get_restart_pool().greenlets) == 3
+			for key, manager in get_async_manager():
+				assert manager.stopped
 			sleep() #allows managers to start  # typically would be a block here
-			self.assertEqual(len(get_restart_pool().greenlets), 3)
-			for manager in get_async_manager()._AsyncManager__managers.itervalues():
-				self.assertEqual(manager.is_running(), True)
+			assert len(get_restart_pool().greenlets) == 3
+			for key, manager in get_async_manager():
+				assert manager.running
 			get_async_manager().trigger_stop()
-		self.assertEqual(len(get_restart_pool().greenlets), 0)
-		for manager in get_async_manager()._AsyncManager__managers.itervalues():
-			self.assertEqual(manager.is_running(), False)
+		assert len(get_restart_pool().greenlets) == 0
+		for key, manager in get_async_manager():
+			assert manager.stopped
 
+		#infinite loop
 		with self.assertRaises(LoopExit):
 			with get_async_manager():
 				pass
@@ -362,64 +231,158 @@ class TestRestartableGreenlet(BaseUnitTest):
 	def test_init(self):
 		def run_test(*args, **kwargs): pass
 		class Logger(object): pass
-		pool = gevent.pool.Pool(greenlet_class=RestartableGreenlet)
+		manager = AsyncContextManager()
 
-		#missing run param
 		with self.assertRaises(TypeError):
-			greenlet = pool.spawn()
+			RestartableGreenlet(run=run_test)
+
+		with self.assertRaises(TypeError):
+			RestartableGreenlet(greenlet_manager=manager)
 
 		#defaults
-		greenlet = pool.spawn(run=run_test,)
-		self.assertEqual(isinstance(greenlet, RestartableGreenlet), True)
-		self.assertEqual(greenlet.rg_run, run_test)
-		self.assertEqual(greenlet.rg_graceful_restart, True)
-		self.assertEqual(greenlet.rg_rough_restart, True)
-		self.assertEqual(greenlet.rg_logger, None)
-		self.assertEqual(greenlet.rg_args, tuple())
-		self.assertEqual(greenlet.rg_kwargs, dict())
-		self.assertEqual(greenlet.running, True)
+		greenlet = RestartableGreenlet(run=run_test, greenlet_manager=manager)
+		assert isinstance(greenlet, RestartableGreenlet)
+		assert greenlet.manager == manager
+		assert greenlet.graceful_restart
+		assert greenlet.rough_restart
+		assert greenlet.logger is None
+		assert greenlet.rg_args == tuple()
+		assert greenlet.rg_kwargs == dict()
+		assert not greenlet.killed
+		assert not greenlet.running
 
 		#inits
 		logger = Logger()
-		greenlet = pool.spawn(run=run_test, graceful_restart=False, rough_restart=False, logger=logger, other="test")
-		self.assertEqual(isinstance(greenlet, RestartableGreenlet), True)
-		self.assertEqual(greenlet.rg_run, run_test)
-		self.assertEqual(greenlet.rg_graceful_restart, False)
-		self.assertEqual(greenlet.rg_rough_restart, False)
-		self.assertEqual(greenlet.rg_logger, logger)
-		self.assertEqual(greenlet.rg_args, tuple())
-		self.assertEqual(greenlet.rg_kwargs, {"other": "test"})
-		self.assertEqual(greenlet.running, True)
+		greenlet = RestartableGreenlet(run=run_test, greenlet_manager=manager, graceful_restart=False, rough_restart=False, logger=logger, other="test", killed=True)
+		assert isinstance(greenlet, RestartableGreenlet)
+		assert greenlet.manager == manager
+		assert not greenlet.graceful_restart
+		assert not greenlet.rough_restart
+		assert greenlet.logger == logger
+		assert greenlet.rg_args == tuple()
+		assert greenlet.rg_kwargs == {"other": "test", "killed": True}
+		assert not greenlet.killed
 
-		sleep()
-		self.assertEqual(greenlet.running, False)
+	def test_state(self):
+		streamer = RedirectStdStreams()
+		class MockRestartableGreenlet(funcs_tester(clazz=RestartableGreenlet)):
+			def _report_error(self, *args, **kwargs):
+				with streamer:
+					super(MockRestartableGreenlet, self)._report_error(*args, **kwargs)
+		def run_func_graceful(): pass
+		def run_func_rough(): print "11233"; raise Exception("????")
+		def run_func_kill(): raise KilledException
+		class MockPool(gevent.pool.Pool):
+			def kill(self, greenlets=None, *args, **kwargs):
+				super(MockPool, self).kill(*args, **kwargs)
+		manager = AsyncContextManager()
 
-		pool.kill()
+		#test graceful stop with graceful restart
+		_override_restart_pool(pool=MockPool(greenlet_class=MockRestartableGreenlet))
+		greenlet = get_restart_pool().spawn(run=run_func_graceful, greenlet_manager=manager)
+		assert greenlet.running and not greenlet.stopped and not greenlet.stopped_rough and not greenlet.stopped_graceful
+		assert not greenlet.rough_restartable and not greenlet.graceful_restartable and not greenlet.restartable
+		sleep(0)
+		assert not greenlet.running and greenlet.stopped and not greenlet.stopped_rough and greenlet.stopped_graceful
+		assert not greenlet.rough_restartable and not greenlet.graceful_restartable and not greenlet.restartable
+		greenlet = get_restart_pool().spawn(run=run_func_graceful, greenlet_manager=manager)
+		with manager:
+			assert greenlet.running and not greenlet.stopped and not greenlet.stopped_rough and not greenlet.stopped_graceful
+			assert not greenlet.rough_restartable and not greenlet.graceful_restartable and not greenlet.restartable
+			sleep(0)
+			assert not greenlet.running and greenlet.stopped and not greenlet.stopped_rough and greenlet.stopped_graceful
+			assert not greenlet.rough_restartable and greenlet.graceful_restartable and greenlet.restartable
+			manager.trigger_stop()
+
+		#test graceful stop without graceful restart
+		greenlet = get_restart_pool().spawn(run=run_func_graceful, greenlet_manager=manager, graceful_restart=False)
+		assert greenlet.running and not greenlet.stopped and not greenlet.stopped_rough and not greenlet.stopped_graceful
+		assert not greenlet.rough_restartable and not greenlet.graceful_restartable and not greenlet.restartable
+		sleep(0)
+		assert not greenlet.running and greenlet.stopped and not greenlet.stopped_rough and greenlet.stopped_graceful
+		assert not greenlet.rough_restartable and not greenlet.graceful_restartable and not greenlet.restartable
+		greenlet = get_restart_pool().spawn(run=run_func_graceful, greenlet_manager=manager, graceful_restart=False)
+		with manager:
+			assert greenlet.running and not greenlet.stopped and not greenlet.stopped_rough and not greenlet.stopped_graceful
+			assert not greenlet.rough_restartable and not greenlet.graceful_restartable and not greenlet.restartable
+			sleep(0)
+			assert not greenlet.running and greenlet.stopped and not greenlet.stopped_rough and greenlet.stopped_graceful
+			assert not greenlet.rough_restartable and not greenlet.graceful_restartable and not greenlet.restartable
+			manager.trigger_stop()
+
+		#test rough stop with rough restart
+		greenlet = get_restart_pool().spawn(run=run_func_rough, greenlet_manager=manager)
+		assert greenlet.running and not greenlet.stopped and not greenlet.stopped_rough and not greenlet.stopped_graceful
+		assert not greenlet.rough_restartable and not greenlet.graceful_restartable and not greenlet.restartable
+		sleep(0)
+		assert not greenlet.running and greenlet.stopped and greenlet.stopped_rough and not greenlet.stopped_graceful
+		assert not greenlet.rough_restartable and not greenlet.graceful_restartable and not greenlet.restartable
+		greenlet = get_restart_pool().spawn(run=run_func_rough, greenlet_manager=manager)
+		with manager:
+			assert greenlet.running and not greenlet.stopped and not greenlet.stopped_rough and not greenlet.stopped_graceful
+			assert not greenlet.rough_restartable and not greenlet.graceful_restartable and not greenlet.restartable
+			sleep(0)
+			assert not greenlet.running and greenlet.stopped and greenlet.stopped_rough and not greenlet.stopped_graceful
+			assert greenlet.rough_restartable and not greenlet.graceful_restartable and greenlet.restartable
+			manager.trigger_stop()
+
+		#test rough stop without rough restart
+		greenlet = get_restart_pool().spawn(run=run_func_rough, greenlet_manager=manager, rough_restart=False)
+		assert greenlet.running and not greenlet.stopped and not greenlet.stopped_rough and not greenlet.stopped_graceful
+		assert not greenlet.rough_restartable and not greenlet.graceful_restartable and not greenlet.restartable
+		sleep(0)
+		assert not greenlet.running and greenlet.stopped and greenlet.stopped_rough and not greenlet.stopped_graceful
+		assert not greenlet.rough_restartable and not greenlet.graceful_restartable and not greenlet.restartable
+		greenlet = get_restart_pool().spawn(run=run_func_rough, greenlet_manager=manager, rough_restart=False)
+		with manager:
+			assert greenlet.running and not greenlet.stopped and not greenlet.stopped_rough and not greenlet.stopped_graceful
+			assert not greenlet.rough_restartable and not greenlet.graceful_restartable and not greenlet.restartable
+			sleep(0)
+			assert not greenlet.running and greenlet.stopped and greenlet.stopped_rough and not greenlet.stopped_graceful
+			assert not greenlet.rough_restartable and not greenlet.graceful_restartable and not greenlet.restartable
+			manager.trigger_stop()
+
+		#test killed
+		greenlet = get_restart_pool().spawn(run=run_func_kill, greenlet_manager=manager)
+		assert greenlet.running and not greenlet.stopped and not greenlet.stopped_rough and not greenlet.stopped_graceful
+		assert not greenlet.rough_restartable and not greenlet.graceful_restartable and not greenlet.restartable
+		sleep(0)
+		assert not greenlet.running and greenlet.stopped and greenlet.stopped_rough and not greenlet.stopped_graceful
+		assert not greenlet.rough_restartable and not greenlet.graceful_restartable and not greenlet.restartable
+		greenlet = get_restart_pool().spawn(run=run_func_kill, greenlet_manager=manager)
+		with manager:
+			assert greenlet.running and not greenlet.stopped and not greenlet.stopped_rough and not greenlet.stopped_graceful
+			assert not greenlet.rough_restartable and not greenlet.graceful_restartable and not greenlet.restartable
+			sleep(0)
+			assert not greenlet.running and greenlet.stopped and greenlet.stopped_rough and not greenlet.stopped_graceful
+			assert not greenlet.rough_restartable and not greenlet.graceful_restartable and not greenlet.restartable
+			manager.trigger_stop()
+		
+
 	def test__report_error(self):
 		def run_test(): pass
-		pool = gevent.pool.Pool(greenlet_class=RestartableGreenlet)
-		greenlet = pool.spawn(run=run_test,)
-		streamer = RedirectStdStreams()
+		_override_restart_pool(pool=gevent.pool.Pool(greenlet_class=RestartableGreenlet))
+		greenlet = get_restart_pool().spawn(run=run_test, greenlet_manager=AsyncContextManager())
+		streamer = RedirectStdStreams() 
 		with streamer:
-			greenlet._report_error(exc_info=[BreakoutException, BreakoutException(), 0])
-		self.assertEqual(len(streamer.stderr), 0)
+			greenlet._report_error(exc_info=[KilledException, KilledException(), 0])
+		assert len(streamer.stderr) == 0
 		with streamer:
 			greenlet._report_error(exc_info=[Exception, Exception(), 0])
-		self.assertNotEqual(len(streamer.stderr), 0)
+		assert len(streamer.stderr) != 0
 
 	def test_kill(self):
+		_override_restart_pool(pool=gevent.pool.Pool(greenlet_class=RestartableGreenlet))
 		def callback(greenlet): self.assertEqual(isinstance(greenlet.exception, BreakoutException), True)
 		def run_test(*args, **kwargs): sleep()
-		pool = gevent.pool.Pool(greenlet_class=RestartableGreenlet)
-		pool.kill()
-		self.assertEqual(len(pool.greenlets), 0)
-		greenlet = pool.spawn(run=run_test,)
-		self.assertEqual(len(pool.greenlets), 1)
+		assert len(get_restart_pool().greenlets) == 0
+		greenlet = get_restart_pool().spawn(run=run_test, greenlet_manager=AsyncContextManager())
+		assert len(get_restart_pool().greenlets) == 1
 		greenlet.link_exception(callback=callback)
 		sleep()
-		self.assertEqual(len(pool.greenlets), 1)
-		pool.kill()
-		self.assertEqual(len(pool.greenlets), 0)
+		assert len(get_restart_pool().greenlets) == 1
+		greenlet.kill()
+		assert len(get_restart_pool().greenlets) == 0
 
 
 class TestRestartPool(BaseUnitTest):
@@ -431,167 +394,151 @@ class TestRestartPool(BaseUnitTest):
 
 	def test_init(self):
 		#defaults
+		_override_restart_pool(pool=RestartPool())
 		pool = RestartPool()
-		self.assertEqual(pool.sleep_interval, DEFAULT_SLEEP_INTERVAL)
-		self.assertEqual(pool.graceful_restart, True)
-		self.assertEqual(pool.rough_restart, True)
-		self.assertEqual(pool.logger, None)
-		self.assertEqual(pool.greenlet_class, RestartableGreenlet)
+		assert get_restart_pool().restart_sleep_interval == DEFAULT_SLEEP_INTERVAL
+		assert get_restart_pool().graceful_restart
+		assert get_restart_pool().rough_restart
+		assert get_restart_pool().logger is None
+		assert get_restart_pool().greenlet_class == RestartableGreenlet
 
 		#overrides
-		pool = RestartPool(sleep_interval=2, graceful_restart=False, rough_restart=False, logger=7, greenlet_class=gevent.greenlet.Greenlet)
-		self.assertEqual(pool.sleep_interval, 2)
-		self.assertEqual(pool.graceful_restart, False)
-		self.assertEqual(pool.rough_restart, False)
-		self.assertEqual(pool.logger, 7)
-		self.assertEqual(pool.greenlet_class, RestartableGreenlet)
+		_override_restart_pool(pool=RestartPool(restart_sleep_interval=2, graceful_restart=False, rough_restart=False, logger=7, greenlet_class=gevent.greenlet.Greenlet))
+		assert get_restart_pool().restart_sleep_interval == 2
+		assert not get_restart_pool().graceful_restart
+		assert not get_restart_pool().rough_restart
+		assert get_restart_pool().logger == 7
+		assert get_restart_pool().greenlet_class == RestartableGreenlet
 
 	def test_spawn(self):
 		def test_func(*args, **kwargs): pass
+		manager = AsyncContextManager()
+
+		with self.assertRaises(TypeError):
+			get_restart_pool().spawn(run=test_func)
+		with self.assertRaises(TypeError):
+			get_restart_pool().spawn(greenlet_manager=manager)
+
 		#instance
-		pool = RestartPool()
-		greenlet = pool.spawn(run=test_func)
-		self.assertEqual(isinstance(greenlet, RestartableGreenlet), True)
-		pool.kill()
-		pool = RestartPool(greenlet_class=gevent.greenlet.Greenlet)
-		greenlet = pool.spawn(run=test_func)
-		self.assertEqual(isinstance(greenlet, RestartableGreenlet), True)
-		pool.kill()
+		_override_restart_pool(pool=RestartPool())
+		greenlet = get_restart_pool().spawn(run=test_func, greenlet_manager=manager)
+		assert isinstance(greenlet, RestartableGreenlet)
+
+		_override_restart_pool(pool=RestartPool(greenlet_class=gevent.greenlet.Greenlet))
+		greenlet = get_restart_pool().spawn(run=test_func, greenlet_manager=manager)
+		assert isinstance(greenlet, RestartableGreenlet)
 
 		#defaults
-		pool = RestartPool()
-		greenlet = pool.spawn(run=test_func)
-		self.assertEqual(greenlet.rg_graceful_restart, True)
-		self.assertEqual(greenlet.rg_rough_restart, True)
-		self.assertEqual(greenlet.rg_logger, None)
-		pool.kill()
+		_override_restart_pool(pool=RestartPool())
+		greenlet = get_restart_pool().spawn(run=test_func, greenlet_manager=manager)
+		assert greenlet.manager == manager
+		assert greenlet.graceful_restart
+		assert greenlet.rough_restart
+		assert greenlet.logger is None
 
-		pool = RestartPool(graceful_restart=False, rough_restart=False, logger=7)
-		greenlet = pool.spawn(run=test_func)
-		self.assertEqual(greenlet.rg_graceful_restart, False)
-		self.assertEqual(greenlet.rg_rough_restart, False)
-		self.assertEqual(greenlet.rg_logger, 7)
-		pool.kill()
+		_override_restart_pool(pool=RestartPool(graceful_restart=False, rough_restart=False, logger=7))
+		greenlet = get_restart_pool().spawn(run=test_func, greenlet_manager=manager)
+		assert greenlet.manager == manager
+		assert not greenlet.graceful_restart
+		assert not greenlet.rough_restart
+		assert greenlet.logger == 7
 
 		#overrides
-		pool = RestartPool()
-		greenlet = pool.spawn(run=test_func, graceful_restart=False, rough_restart=False, logger=7)
-		self.assertEqual(greenlet.rg_graceful_restart, False)
-		self.assertEqual(greenlet.rg_rough_restart, False)
-		self.assertEqual(greenlet.rg_logger, 7)
-		pool.kill()
+		_override_restart_pool(pool=RestartPool())
+		greenlet = get_restart_pool().spawn(run=test_func, greenlet_manager=manager, graceful_restart=False, rough_restart=False, logger=7)
+		assert greenlet.manager == manager
+		assert not greenlet.graceful_restart
+		assert not greenlet.rough_restart
+		assert greenlet.logger == 7
 
-		pool = RestartPool(graceful_restart=False, rough_restart=False, logger=7)
-		greenlet = pool.spawn(run=test_func, graceful_restart=True, rough_restart=True, logger=8)
-		self.assertEqual(greenlet.rg_graceful_restart, True)
-		self.assertEqual(greenlet.rg_rough_restart, True)
-		self.assertEqual(greenlet.rg_logger, 8)
-		pool.kill()
+		_override_restart_pool(pool=RestartPool(graceful_restart=False, rough_restart=False, logger=7))
+		greenlet = get_restart_pool().spawn(run=test_func, greenlet_manager=manager, graceful_restart=True, rough_restart=True, logger=8)
+		assert greenlet.manager == manager
+		assert greenlet.graceful_restart
+		assert greenlet.rough_restart
+		assert greenlet.logger == 8
 
 		#test links
-		pool = RestartPool()
-		greenlet = pool.spawn(run=test_func, graceful_restart=False, rough_restart=False, logger=7)
-		self.assertEqual(len(greenlet._links), 3)  #default, graceful, and irregular links
-		pool.kill()
+		_override_restart_pool(pool=RestartPool())
+		greenlet = get_restart_pool().spawn(run=test_func, greenlet_manager=manager, graceful_restart=False, rough_restart=False, logger=7)
+		assert len(greenlet._links) == 3  #default, graceful, and irregular links
 
 
-	def test_respawn_greenlet(self):
-		def test_func(*args, **kwargs): pass
-		pool = RestartPool()
-		greenlet1 = pool.spawn(run=test_func, graceful_restart=False, logger=9, some_kwarg="some_val")
-		greenlet2 = pool.respawn_greenlet(greenlet=greenlet1)
+	def test_graceful_restart(self):
+		def test_func(): pass
+		manager = AsyncContextManager()
+		with manager:
 
-		self.assertNotEqual(greenlet1, greenlet2)
-		self.assertEqual(greenlet1.rg_run, greenlet2.rg_run)
-		self.assertEqual(greenlet1.rg_graceful_restart, greenlet2.rg_graceful_restart)
-		self.assertEqual(greenlet1.rg_rough_restart, greenlet2.rg_rough_restart)
-		self.assertEqual(greenlet1.rg_logger, greenlet2.rg_logger)
-		self.assertEqual(greenlet1.rg_args, greenlet2.rg_args)
-		self.assertEqual(greenlet1.rg_kwargs, greenlet2.rg_kwargs)
-		pool.kill()
+			#graceful_restart = True
+			_override_restart_pool(pool=RestartPool())
+			assert len(get_restart_pool().greenlets) == 0
+			greenlet = get_restart_pool().spawn(run=test_func, graceful_restart=True, greenlet_manager=manager)
+			assert len(get_restart_pool().greenlets) == 1
+			assert list(get_restart_pool().greenlets)[0] == greenlet
+			sleep(0); sleep(0); sleep()
+			assert len(get_restart_pool().greenlets) == 1
+			assert list(get_restart_pool().greenlets)[0] != greenlet
 
-	def test__RestartPool__graceful_termination(self):
-		#successful restart
-		def test_func(*args, **kwargs): pass
-		pool = RestartPool()
-		self.assertEqual(len(pool.greenlets), 0)
-		greenlet = pool.spawn(run=test_func)
-		self.assertEqual(len(pool.greenlets), 1)
-		self.assertEqual(list(pool.greenlets)[0], greenlet)
-		self.assertEqual(greenlet.rg_graceful_restart, True)
-		sleep()
-		self.assertEqual(len(pool.greenlets), 1)
-		self.assertNotEqual(list(pool.greenlets)[0], greenlet)
-		self.assertEqual(greenlet.rg_graceful_restart, True)
-		pool.kill()
+			#graceful_restart = False
+			_override_restart_pool(pool=RestartPool())
+			assert len(get_restart_pool().greenlets) == 0
+			greenlet = get_restart_pool().spawn(run=test_func, graceful_restart=False, greenlet_manager=manager)
+			assert len(get_restart_pool().greenlets) == 1
+			sleep(0); sleep(0)
+			assert len(get_restart_pool().greenlets) == 0
 
-		#not configured restart
-		pool = RestartPool()
-		self.assertEqual(len(pool.greenlets), 0)
-		greenlet = pool.spawn(run=test_func, graceful_restart=False)
-		self.assertEqual(len(pool.greenlets), 1)
-		self.assertEqual(list(pool.greenlets)[0], greenlet)
-		self.assertEqual(greenlet.rg_graceful_restart, False)
-		sleep()
-		self.assertEqual(len(pool.greenlets), 0)
-		pool.kill()
+	def test_rough_restart(self):
+		def test_func(): raise Exception()
+		manager = AsyncContextManager()
 
-	def test__RestartPool__irregular_termination(self):
-		#successful restart
-		def test_func(*args, **kwargs): sleep(); raise Exception()
-		pool = RestartPool()
-		self.assertEqual(len(pool.greenlets), 0)
-		greenlet = pool.spawn(run=test_func, suppress_std=True)
-		self.assertEqual(len(pool.greenlets), 1)
-		self.assertEqual(list(pool.greenlets)[0], greenlet)
-		self.assertEqual(greenlet.rg_rough_restart, True)
-		sleep(); sleep()
-		self.assertEqual(len(pool.greenlets), 0)
-		sleep()
-		self.assertEqual(len(pool.greenlets), 1)
-		self.assertNotEqual(list(pool.greenlets)[0], greenlet)
-		self.assertEqual(greenlet.rg_rough_restart, True)
-		pool.kill()
+		with manager:
+			#rough_restart = True
+			_override_restart_pool(pool=RestartPool())
+			assert len(get_restart_pool().greenlets) == 0
+			greenlet = get_restart_pool().spawn(run=test_func, rough_restart=True, greenlet_manager=manager)
+			assert len(get_restart_pool().greenlets) == 1
+			assert list(get_restart_pool().greenlets)[0] == greenlet
+			sleep(0); sleep(0); sleep()
+			assert len(get_restart_pool().greenlets) == 1
+			assert list(get_restart_pool().greenlets)[0] != greenlet
 
-		#not configured restart
-		pool = RestartPool()
-		self.assertEqual(len(pool.greenlets), 0)
-		greenlet = pool.spawn(run=test_func, rough_restart=False, suppress_std=True)
-		self.assertEqual(len(pool.greenlets), 1)
-		self.assertEqual(list(pool.greenlets)[0], greenlet)
-		self.assertEqual(greenlet.rg_rough_restart, False)
-		sleep(); sleep()
-		self.assertEqual(len(pool.greenlets), 0)
-		sleep()
-		self.assertEqual(len(pool.greenlets), 0)
-		pool.kill()
-
-	def test_killone(self):
-		def test_func(): sleep()
-		def new_irregular(greenlet):
-			self.assertEqual(isinstance(greenlet.exception, BreakoutException), True)
-		pool = RestartPool()
-		pool._RestartPool__irregular_termination = new_irregular
-		greenlet = pool.spawn(run=test_func)
-		self.assertEqual(len(pool.greenlets), 1)
-		pool.killone(greenlet=greenlet)
-		self.assertEqual(len(pool.greenlets), 1)
-		sleep()
-		self.assertEqual(len(pool.greenlets), 0)
+			#rough_restart = False
+			_override_restart_pool(pool=RestartPool())
+			assert len(get_restart_pool().greenlets) == 0
+			greenlet = get_restart_pool().spawn(run=test_func, rough_restart=False, greenlet_manager=manager)
+			assert len(get_restart_pool().greenlets) == 1
+			sleep(0); sleep(0)
+			assert len(get_restart_pool().greenlets) == 0
 
 	def test_kill(self):
-		def test_func(): sleep()
-		def new_irregular(greenlet):
-			self.assertEqual(isinstance(greenlet.exception, BreakoutException), True)
-		pool = RestartPool()
-		pool._RestartPool__irregular_termination = new_irregular
-		greenlet = pool.spawn(run=test_func)
-		greenlet = pool.spawn(run=test_func)
-		self.assertEqual(len(pool.greenlets), 2)
-		pool.kill()
-		self.assertEqual(len(pool.greenlets), 2)
-		sleep()
-		self.assertEqual(len(pool.greenlets), 0)
+		def test_func_1(): pass
+		def test_func_2(): sleep()
+		manager = AsyncContextManager()
+		with manager:
+			#killed with sleep
+			_override_restart_pool(pool=RestartPool())
+			assert len(get_restart_pool().greenlets) == 0
+			greenlet = get_restart_pool().spawn(run=test_func_1, graceful_restart=True, rough_restart=True, greenlet_manager=manager)
+			assert len(get_restart_pool().greenlets) == 1
+			get_restart_pool().kill()
+			assert len(get_restart_pool().greenlets) == 0
+
+			#killed without sleep
+			_override_restart_pool(pool=RestartPool())
+			assert len(get_restart_pool().greenlets) == 0
+			greenlet = get_restart_pool().spawn(run=test_func_2, graceful_restart=True, rough_restart=True, greenlet_manager=manager)
+			assert len(get_restart_pool().greenlets) == 1
+			get_restart_pool().kill()
+			assert len(get_restart_pool().greenlets) == 0
+
+			#kill multiple
+			_override_restart_pool(pool=RestartPool())
+			assert len(get_restart_pool().greenlets) == 0
+			greenlet = get_restart_pool().spawn(run=test_func_1, graceful_restart=True, rough_restart=True, greenlet_manager=manager)
+			greenlet = get_restart_pool().spawn(run=test_func_1, graceful_restart=True, rough_restart=True, greenlet_manager=manager)
+			assert len(get_restart_pool().greenlets) == 2
+			get_restart_pool().kill()
+			assert len(get_restart_pool().greenlets) == 0
 
 class TestAsyncContextManager(BaseUnitTest):
 

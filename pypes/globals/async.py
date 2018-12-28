@@ -15,8 +15,8 @@ def get_async_manager():
 def _override_async_manager(manager):
     global __async_manager
     if not __async_manager is None:
-        #__async_manager.__exit__()
-        __async_manager.__del__()
+        for key in __async_manager._AsyncManager__managers.keys():
+            __async_manager.remove_context_manager(key=key)
     __async_manager = manager
 
 #should only be used for testing

@@ -30,12 +30,12 @@ class AsyncContextManagerMeta(type):
 	_root_class_name = "AsyncContextManager"
 
 	def __new__(cls, name, bases, body):
-		ignore_derivative_attrs = ["__new__", "__del__", "__enter__", "__exit__",
+		ignore_derivative_attrs = ["__enter__", "__exit__",
 		"_AsyncContextManager__respawn_stopped_greenlets",
 		"_AsyncContextManager__kill_running_greenlets",
 		"_AsyncContextManager__force_running",
-		"_swap_greenlets", "_pop_greenlets", "spawn_greenlet",
-		"is_running", "wait_for_running", "wait_for_stop", "trigger_stop"]
+		"_swap_greenlets", "_pop_greenlet", "spawn_greenlet",
+		"running", "wait_for_running", "wait_for_stopping", "trigger_stop"]
 
 		#force_derivative_attrs = ["start", "stop"]
 

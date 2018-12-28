@@ -46,42 +46,36 @@ class AsyncManager:
 
     def __init__(self, *args, **kwargs):
         self.__managers = {}
+        self.__contexts = {}
         gevent.signal(signal.SIGINT, self.trigger_stop)
         gevent.signal(signal.SIGTERM, self.trigger_stop)
         self.__stopped = gevent.event.Event()
-        self.trigger_stop()
-
-    def __del__(self, *args, **kwargs):
-        for key in self.__managers.keys():
-            self.remove_context_manager(key=key)
-            
-    @property
-    def is_stopped(self):
-        return self.__stopped.is_set()
-    
-    def __pop_stopping_threads(self): #allows start context thread to close
-        is_stopped = self.is_stopped
         self.__stopped.set()
-        sleep(); sleep() # bipass local and global blocks
-        if not is_stopped:
-            self.__stopped.clear()
+
+    @property
+    def running(self):
+        return not self.__stopped.is_set()
+    
+    @property
+    def stopped(self):
+        return self.__stopped.is_set()
 
     def __try_stop_single(self, manager):
         stopping_greenlets = []
-        if manager.is_running():
+        if manager.running:
             manager.trigger_stop()
             stopping_greenlets += manager.greenlets
-        assert manager.is_stopping()
+            stopping_greenlets.append(self.__contexts.pop(manager._async_hidden_key))
         return stopping_greenlets
 
     def __try_start_single(self, manager):
-        if not manager.is_running():
-            get_restart_pool().spawn(run=self.__single_start, greenlet_manager=manager, manager=manager, graceful_restart=False, rough_restart=False)
+        if manager.stopped and self.__contexts.get(manager._async_hidden_key, None) is None:
+            greenlet = get_restart_pool().spawn(run=self.__single_start, greenlet_manager=manager, manager=manager, graceful_restart=False, rough_restart=False)
+            self.__contexts[manager._async_hidden_key] = greenlet
 
     def __single_start(self, manager):
         with manager:
-            manager.wait_for_stop()
-            self.wait_for_stop()
+            manager.wait_for_stopping()
 
     def __enter__(self, block=None, *args, **kwargs):
         self.__stopped.clear()
@@ -99,10 +93,11 @@ class AsyncManager:
     def trigger_stop(self):
         self.__stopped.set()
 
-    def add_context_manager(self, key, manager):
-        assert isinstance(manager, AsyncContextManager)
+    #should only be called through __init__ func of AsyncContextManager
+    def _add_context_manager(self, key, manager):
+        assert not key in self.__managers
         self.__managers[key] = manager
-        if not self.is_stopped:
+        if self.running:
             self.__try_start_single(manager=manager)
 
     def remove_context_manager(self, key):
@@ -111,9 +106,15 @@ class AsyncManager:
         except KeyError:
             pass
         else:
-            if not self.is_stopped:
+            if self.running:
                 stopping_greenlets = self.__try_stop_single(manager=manager)
                 joinall(greenlets=stopping_greenlets)
+
+    def __len__(self):
+        return len(self.__managers)
+
+    def __iter__(self):
+        return self.__managers.iteritems()
 
 class RestartPool(Pool):
     """
@@ -182,7 +183,7 @@ class RestartPool(Pool):
     def __graceful_termination(self, greenlet):
         if not greenlet.killed: #killed greenlets allowed to die but still tracked by manager
             if not self.try_graceful_restart(greenlet=greenlet):
-                greenlet.manager._pop_greenlets(old_greenlet=greenlet)
+                greenlet.manager._pop_greenlet(old_greenlet=greenlet)
 
     def __rough_termination(self, greenlet):
         if greenlet.killed: #killed greenlets allowed to die but still tracked by manager
@@ -194,9 +195,6 @@ class RestartPool(Pool):
             
             if not self.try_rough_restart(greenlet=greenlet):
                 greenlet.manager._pop_greenlets(old_greenlet=greenlet)
-
-    def killone(self, greenlet, block=True, *args, **kwargs):
-        self.kill(greenlets=[greenlet], block=block)
 
     def kill(self, greenlets=None, block=True, *args, **kwargs):
         greenlets = self.greenlets if greenlets is None else greenlets
@@ -254,7 +252,7 @@ class RestartableGreenlet(Greenlet):
 
     @property
     def logger(self):
-        return self.__manager
+        return self.__logger
 
     @property
     def graceful_restart(self):
@@ -274,27 +272,27 @@ class RestartableGreenlet(Greenlet):
 
     @property
     def running(self):
-        return self.started and not self.ready
+        return self.started and not bool(self.ready())
 
     @property
     def stopped(self):
-        return self.started and self.ready
+        return bool(self.ready())
     
     @property
     def stopped_rough(self):
-        return self.stopped and not self.successful
+        return self.stopped and not self.successful()
 
     @property
     def stopped_graceful(self):
-        return self.stopped and self.successful
+        return self.stopped and self.successful()
     
     @property
     def rough_restartable(self):
-        return self.stopped_rough and self.rough_restart and self.manager.is_running() and isinstance(self.exception, Exception) and not isinstance(self.exception, KilledException)
+        return self.stopped_rough and self.rough_restart and self.manager.running and not isinstance(self.exception, KilledException)
     
     @property
     def graceful_restartable(self):
-        return self.stopped_graceful and self.graceful_restart and self.manager.is_running() and self.exception is None
+        return self.stopped_graceful and self.graceful_restart and self.manager.running and self.exception is None
     
     @property
     def restartable(self):
@@ -319,29 +317,34 @@ class AsyncContextManager(object):
 
     __metaclass__ = AsyncContextManagerMeta
 
-    def __init__(self, *args, **kwargs):
-        self.__stopped = AsyncContextManager.__async_class()
-        self.__stopped.set()
+    def __init__(self, async_hidden_key=None, *args, **kwargs):
+        self.__running = AsyncContextManager.__async_class()
+        self.__stopping = AsyncContextManager.__async_class()
+        self.__running.clear()
+        self.__stopping.set()
         self.__sub_greenlets = []
+        self._async_hidden_key = uuid().get_hex() if async_hidden_key is None else async_hidden_key
+        get_async_manager()._add_context_manager(key=self._async_hidden_key, manager=self)
 
     @property
     def greenlets(self):
         return self.__sub_greenlets
     
-    def __new__(cls, async_hidden_key=None, *args, **kwargs):
-        instance = super(AsyncContextManager, cls).__new__(cls)
-        instance.__async_hidden_key = uuid().get_hex() if async_hidden_key is None else async_hidden_key
-        instance.__running = AsyncContextManager.__async_class()
-        instance.__running.clear()
-        get_async_manager().add_context_manager(key=instance.__async_hidden_key, manager=instance)
-        return instance
+    @property
+    def running(self):
+        return self.__running.is_set() and not self.__stopping.is_set()
 
-    def __del__(self, *args, **kwargs):
-        get_async_manager().remove_context_manager(key=self.__async_hidden_key, manager=self)
+    @property
+    def stopping(self):
+        return self.__stopping.is_set() and self.__running.is_set()
+    
+    @property
+    def stopped(self):
+        return self.__stopping.is_set() and not self.__running.is_set()
 
     def __enter__(self, *args, **kwargs):
         self.__running.set()
-        self.__stopped.clear()
+        self.__stopping.clear()
         self.__respawn_stopped_greenlets()
         if hasattr(self, "start"): self.start(*args, **kwargs)
 
@@ -365,30 +368,24 @@ class AsyncContextManager(object):
 
     #intended to be used by RestartPool
     def _swap_greenlets(self, old_greenlet, new_greenlet):
-        self.pop_greenlets(old_greenlet=old_greenlet)
+        self._pop_greenlet(old_greenlet=old_greenlet)
         if not new_greenlet in self.__sub_greenlets: self.__sub_greenlets.append(new_greenlet)
 
     #intended to be used by RestartPool
-    def _pop_greenlets(self, old_greenlet):
+    def _pop_greenlet(self, old_greenlet):
         with ignored(ValueError):
             self.__sub_greenlets.remove(old_greenlet)
 
     def spawn_greenlet(self, run, *args, **kwargs):
-        greenlet = get_restart_pool().spawn(run=self.__force_running, manager=self, forced_func=run, *args, **kwargs)
+        greenlet = get_restart_pool().spawn(run=self.__force_running, greenlet_manager=self, forced_func=run, *args, **kwargs)
         self.__sub_greenlets.append(greenlet)
         return greenlet
-
-    def is_running(self):
-        return self.__running.is_set()
-
-    def is_stopping(self):
-        return self.__stopped.is_set()
 
     def wait_for_running(self):
         self.__running.wait()
 
-    def wait_for_stop(self):
-        self.__stopped.wait()
+    def wait_for_stopping(self):
+        self.__stopping.wait()
 
     def trigger_stop(self):
-        self.__stopped.set()
+        self.__stopping.set()
